@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Michael's Kahoot Cheats
-// @version      7.3
+// @version      7.6
 // @description  Kahoot cheats
 // @namespace    https://
 // @match        https://kahoot.it/*
@@ -14,27 +14,21 @@
     const CONFIG = {
         uiToggleKey: 'q',
         markersToggleKey: 'b',
-        autoAnswerToggleKey: 'a',
         selfDestructKey: 'x',
-        clearConsoleKey: 'p',
         ctrlRequired: true,
         markerColor: '#000000',
         markerSize: '6px',
-        detectionInterval: 50,
+        detectionInterval: 100, // Slightly slower for better performance
         apiEndpoint: 'https://damp-leaf-16aa.johnwee.workers.dev/api-proxy/',
-        searchEndpoint: 'https://damp-leaf-16aa.johnwee.workers.dev/rest/kahoots/',
-        defaultPoints: 900,
-        minPoints: 500,
-        maxPoints: 1000,
-        inputLag: 100
+        searchEndpoint: 'https://damp-leaf-16aa.johnwee.workers.dev/rest/kahoots/'
     };
     
-    // === POSITION MAPPING ===
-    const POSITION_MAP = {
-        0: 'bottom-right',
-        1: 'top-right',
-        2: 'bottom-left',
-        3: 'top-left'
+    // === CORNER MAPPING (FIXED: opposite corners) ===
+    const CORNER_MAP = {
+        0: 'bottom-right',  // Answer 0 (top-left) → marker bottom-right
+        1: 'bottom-left',   // Answer 1 (top-right) → marker bottom-left
+        2: 'top-right',     // Answer 2 (bottom-left) → marker top-right
+        3: 'top-left'       // Answer 3 (bottom-right) → marker top-left
     };
     
     // === STATE MANAGEMENT ===
@@ -53,14 +47,8 @@
         isSearching: false,
         currentQuizId: null,
         markedAnswers: new Set(),
-        // AUTO-ANSWER SYSTEM - IMPROVED
-        autoAnswerEnabled: false,
-        pointsPerQuestion: CONFIG.defaultPoints,
-        lastAnsweredQuestion: -1,
-        isAnswering: false,
-        inputLagCompensation: CONFIG.inputLag,
-        answeredPPT: CONFIG.defaultPoints,
-        ILSetQuestion: -1
+        lastMarkerCheck: 0,
+        markerCheckInterval: 500 // Check for markers every 500ms
     };
     
     // === DARK UI CREATION ===
@@ -94,7 +82,7 @@
     });
     
     const title = document.createElement('div');
-    title.innerHTML = '<span style="color:#ffffff;font-size:20px;margin-right:10px">😈</span><span style="color:#ffffff;font-weight:600;font-size:16px">Michael\'s Kahoot Cheats v7.3</span>';
+    title.innerHTML = '<span style="color:#ffffff;font-size:20px;margin-right:10px">😈</span><span style="color:#ffffff;font-weight:600;font-size:16px">Michael\'s Kahoot Cheats v7.6</span>';
     header.appendChild(title);
     
     const controls = document.createElement('div');
@@ -205,145 +193,6 @@
     featuresGrid.style.gridTemplateColumns = '1fr';
     featuresGrid.style.gap = '12px';
     
-    // === AUTO ANSWER CONTROLS ===
-    const autoAnswerContainer = document.createElement('div');
-    autoAnswerContainer.style.cssText = `
-        padding: 12px;
-        background: #111111;
-        border-radius: 8px;
-        border: 1px solid #222222;
-    `;
-    
-    // Auto Answer Toggle Row
-    const autoToggleRow = document.createElement('div');
-    autoToggleRow.style.cssText = `
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 12px;
-    `;
-    
-    const autoLabel = document.createElement('span');
-    autoLabel.textContent = 'Auto Answer (Ctrl+A)';
-    autoLabel.style.cssText = `
-        color: #ffffff;
-        font-size: 14px;
-        font-weight: 500;
-    `;
-    
-    // Toggle Switch for Auto Answer
-    const autoToggleWrapper = document.createElement('div');
-    autoToggleWrapper.style.cssText = `
-        position: relative;
-        width: 44px;
-        height: 24px;
-    `;
-    
-    const autoCheckbox = document.createElement('input');
-    autoCheckbox.type = 'checkbox';
-    autoCheckbox.id = 'autoAnswerToggle';
-    autoCheckbox.style.cssText = `
-        opacity: 0;
-        width: 0;
-        height: 0;
-    `;
-    
-    const autoSlider = document.createElement('span');
-    autoSlider.style.cssText = `
-        position: absolute;
-        cursor: pointer;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background-color: #222222;
-        transition: .4s;
-        border-radius: 12px;
-    `;
-    
-    const autoKnob = document.createElement('span');
-    autoKnob.style.cssText = `
-        position: absolute;
-        height: 18px;
-        width: 18px;
-        left: 3px;
-        bottom: 3px;
-        background-color: #666666;
-        transition: .4s;
-        border-radius: 50%;
-    `;
-    
-    autoSlider.appendChild(autoKnob);
-    autoToggleWrapper.appendChild(autoCheckbox);
-    autoToggleWrapper.appendChild(autoSlider);
-    
-    autoToggleRow.appendChild(autoLabel);
-    autoToggleRow.appendChild(autoToggleWrapper);
-    autoAnswerContainer.appendChild(autoToggleRow);
-    
-    // Points Slider
-    const pointsSliderContainer = document.createElement('div');
-    pointsSliderContainer.style.cssText = `
-        margin-top: 10px;
-        padding-top: 10px;
-        border-top: 1px solid #222222;
-    `;
-    
-    const pointsLabel = document.createElement('div');
-    pointsLabel.id = 'pointsLabel';
-    pointsLabel.textContent = `Points per Answer: ~${state.pointsPerQuestion}`;
-    pointsLabel.style.cssText = `
-        color: #ffffff;
-        font-size: 13px;
-        margin-bottom: 8px;
-    `;
-    
-    const pointsSlider = document.createElement('input');
-    pointsSlider.type = 'range';
-    pointsSlider.min = CONFIG.minPoints.toString();
-    pointsSlider.max = CONFIG.maxPoints.toString();
-    pointsSlider.value = state.pointsPerQuestion.toString();
-    pointsSlider.id = 'pointsSlider';
-    pointsSlider.style.cssText = `
-        width: 100%;
-        height: 6px;
-        background: #222222;
-        border-radius: 3px;
-        outline: none;
-        -webkit-appearance: none;
-        appearance: none;
-    `;
-    
-    // Custom slider thumb
-    const sliderStyle = document.createElement('style');
-    sliderStyle.textContent = `
-        #pointsSlider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background: #ffffff;
-            cursor: pointer;
-            border: 2px solid #222222;
-        }
-        #pointsSlider::-moz-range-thumb {
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background: #ffffff;
-            cursor: pointer;
-            border: 2px solid #222222;
-        }
-    `;
-    document.head.appendChild(sliderStyle);
-    
-    pointsSliderContainer.appendChild(pointsLabel);
-    pointsSliderContainer.appendChild(pointsSlider);
-    autoAnswerContainer.appendChild(pointsSliderContainer);
-    
-    featuresGrid.appendChild(autoAnswerContainer);
-    
     // Highlight Answers Toggle
     const highlightToggle = document.createElement('div');
     highlightToggle.style.cssText = `
@@ -401,7 +250,7 @@
     featuresSection.appendChild(featuresGrid);
     content.appendChild(featuresSection);
     
-    // Status Indicator (Simplified - only shows when features active)
+    // Status Indicator
     const statusIndicator = document.createElement('div');
     statusIndicator.id = 'statusIndicator';
     statusIndicator.style.cssText = `
@@ -525,9 +374,7 @@
     });
     statusBar.innerHTML = `
         Toggle UI: <kbd style="background:#222222;padding:2px 6px;border-radius:4px;color:#ffffff">Ctrl+Q</kbd> 
-        | Auto Answer: <kbd style="background:#222222;padding:2px 6px;border-radius:4px;color:#ffffff">Ctrl+A</kbd>
         | Highlight: <kbd style="background:#222222;padding:2px 6px;border-radius:4px;color:#ffffff">Ctrl+B</kbd>
-        | Clear Console: <kbd style="background:#222222;padding:2px 6px;border-radius:4px;color:#ffffff">Ctrl+P</kbd>
         | Destroy: <kbd style="background:#333333;padding:2px 6px;border-radius:4px;color:#ffffff">Ctrl+X</kbd>
     `;
     
@@ -539,7 +386,7 @@
     const markerStyle = document.createElement('style');
     markerStyle.id = 'corner-marker-style';
     markerStyle.textContent = `
-        .michaels-corner-marker {
+        .kahoot-marker {
             position: absolute !important;
             width: ${CONFIG.markerSize} !important;
             height: ${CONFIG.markerSize} !important;
@@ -549,28 +396,24 @@
             z-index: 10000 !important;
         }
         
-        .michaels-corner-marker[data-position="top-left"] {
-            top: 4px !important;
-            left: 4px !important;
+        .kahoot-marker[data-position="top-left"] {
+            top: 3px !important;
+            left: 3px !important;
         }
         
-        .michaels-corner-marker[data-position="top-right"] {
-            top: 4px !important;
-            right: 4px !important;
+        .kahoot-marker[data-position="top-right"] {
+            top: 3px !important;
+            right: 3px !important;
         }
         
-        .michaels-corner-marker[data-position="bottom-left"] {
-            bottom: 4px !important;
-            left: 4px !important;
+        .kahoot-marker[data-position="bottom-left"] {
+            bottom: 3px !important;
+            left: 3px !important;
         }
         
-        .michaels-corner-marker[data-position="bottom-right"] {
-            bottom: 4px !important;
-            right: 4px !important;
-        }
-        
-        button[data-functional-selector^="answer-"] {
-            position: relative !important;
+        .kahoot-marker[data-position="bottom-right"] {
+            bottom: 3px !important;
+            right: 3px !important;
         }
     `;
     document.head.appendChild(markerStyle);
@@ -586,44 +429,94 @@
         updateToggleVisual();
         updateStatusIndicator();
         
-        // Clear console on start
-        console.clear();
-        console.log('🎮 Michael\'s Kahoot Cheats v7.3 loaded');
-        console.log('📊 State:', state);
-        console.log('🛠️  Hotkeys: Ctrl+Q (UI), Ctrl+A (Auto), Ctrl+B (Highlight), Ctrl+P (Clear Console), Ctrl+X (Destroy)');
+        // Silence console
+        if (window.console) {
+            console.clear();
+            ['log', 'error', 'warn', 'info', 'debug'].forEach(method => {
+                console[method] = function(){};
+            });
+        }
     }
     
     function setupDrag() {
         let isDragging = false;
-        let offset = { x: 0, y: 0 };
+        let offsetX = 0;
+        let offsetY = 0;
         
-        header.addEventListener('mousedown', startDrag);
-        document.addEventListener('mousemove', drag);
-        document.addEventListener('mouseup', stopDrag);
-        
-        function startDrag(e) {
+        const startDrag = (e) => {
             isDragging = true;
             const rect = ui.getBoundingClientRect();
-            offset.x = e.clientX - rect.left;
-            offset.y = e.clientY - rect.top;
-        }
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            
+            ui.style.userSelect = 'none';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        };
         
-        function drag(e) {
+        const drag = (e) => {
             if (!isDragging) return;
             
-            const x = e.clientX - offset.x;
-            const y = e.clientY - offset.y;
+            let x = e.clientX - offsetX;
+            let y = e.clientY - offsetY;
             
             const maxX = window.innerWidth - ui.offsetWidth;
             const maxY = window.innerHeight - ui.offsetHeight;
             
-            ui.style.left = Math.max(0, Math.min(x, maxX)) + 'px';
-            ui.style.top = Math.max(0, Math.min(y, maxY)) + 'px';
-        }
+            x = Math.max(0, Math.min(x, maxX));
+            y = Math.max(0, Math.min(y, maxY));
+            
+            ui.style.transform = `translate(${x}px, ${y}px)`;
+            ui.style.left = '0';
+            ui.style.top = '0';
+            
+            e.preventDefault();
+        };
         
-        function stopDrag() {
+        const stopDrag = () => {
+            if (!isDragging) return;
+            
             isDragging = false;
-        }
+            
+            const transform = ui.style.transform;
+            const match = transform.match(/translate\(([^,]+)px,\s*([^)]+)px\)/);
+            if (match) {
+                const x = parseFloat(match[1]);
+                const y = parseFloat(match[2]);
+                
+                ui.style.left = x + 'px';
+                ui.style.top = y + 'px';
+                ui.style.transform = 'none';
+            }
+            
+            ui.style.userSelect = '';
+            document.body.style.userSelect = '';
+        };
+        
+        // Mouse events
+        header.addEventListener('mousedown', startDrag);
+        document.addEventListener('mousemove', drag);
+        document.addEventListener('mouseup', stopDrag);
+        
+        // Touch events
+        header.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+                startDrag(e.touches[0]);
+            }
+        });
+        
+        document.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 1 && isDragging) {
+                drag(e.touches[0]);
+                e.preventDefault();
+            }
+        }, { passive: false });
+        
+        document.addEventListener('touchend', stopDrag);
+        document.addEventListener('touchcancel', stopDrag);
+        
+        header.style.userSelect = 'none';
+        header.style.webkitUserSelect = 'none';
     }
     
     function setupControls() {
@@ -665,35 +558,8 @@
             }
         });
         
-        // Auto Answer Toggle
-        autoCheckbox.addEventListener('change', function() {
-            state.autoAnswerEnabled = this.checked;
-            if (this.checked) {
-                autoSlider.style.backgroundColor = '#444444';
-                autoKnob.style.transform = 'translateX(20px)';
-                autoKnob.style.backgroundColor = '#ffffff';
-                console.log('✅ Auto Answer: ENABLED');
-            } else {
-                autoSlider.style.backgroundColor = '#222222';
-                autoKnob.style.transform = 'translateX(0)';
-                autoKnob.style.backgroundColor = '#666666';
-                console.log('⛔ Auto Answer: DISABLED');
-            }
-            updateStatusIndicator();
-        });
-        
-        // Points Slider
-        pointsSlider.addEventListener('input', function() {
-            state.pointsPerQuestion = parseInt(this.value);
-            state.answeredPPT = state.pointsPerQuestion;
-            pointsLabel.textContent = `Points per Answer: ~${state.pointsPerQuestion}`;
-            console.log(`🎯 Points set to: ${state.pointsPerQuestion}`);
-        });
-        
-        // Highlight Answers Toggle
-        highlightToggle.addEventListener('click', () => {
-            toggleHighlight(!state.markersEnabled);
-        });
+        // Highlight Answers Toggle - WITH INSTANT ACTION
+        highlightToggle.addEventListener('click', toggleMarkers);
         
         unloadButton.addEventListener('click', unloadQuiz);
         unloadButton.addEventListener('mouseenter', () => {
@@ -702,6 +568,21 @@
         unloadButton.addEventListener('mouseleave', () => {
             unloadButton.style.opacity = '0.7';
         });
+    }
+    
+    function toggleMarkers() {
+        state.markersEnabled = !state.markersEnabled;
+        updateToggleVisual();
+        updateStatusIndicator();
+        
+        if (state.markersEnabled) {
+            statusDot.style.background = '#000000';
+            // INSTANTLY check for and apply markers
+            checkAndApplyMarkers(true);
+        } else {
+            statusDot.style.background = '#444444';
+            removeAllMarkers();
+        }
     }
     
     function performSearch(query) {
@@ -715,13 +596,14 @@
         }
         
         state.isSearching = true;
-        showLoading();
+        resultsDropdown.innerHTML = '<div style="padding: 10px; color: #ffffff; text-align: center;">Searching...</div>';
+        resultsDropdown.style.display = 'block';
         
         const searchUrl = `${CONFIG.searchEndpoint}?query=${encodeURIComponent(query)}`;
         
         fetch(searchUrl)
             .then(response => {
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                if (!response.ok) throw new Error();
                 return response.json();
             })
             .then(data => {
@@ -735,17 +617,11 @@
                 displayResults();
                 state.isSearching = false;
             })
-            .catch(error => {
-                console.error('Search error:', error);
+            .catch(() => {
                 resultsDropdown.innerHTML = '<div style="padding: 10px; color: #ffffff; text-align: center;">Search failed. Try a Quiz ID instead.</div>';
                 resultsDropdown.style.display = 'block';
                 state.isSearching = false;
             });
-    }
-    
-    function showLoading() {
-        resultsDropdown.innerHTML = '<div style="padding: 10px; color: #ffffff; text-align: center;">Searching...</div>';
-        resultsDropdown.style.display = 'block';
     }
     
     function displayResults() {
@@ -816,22 +692,6 @@
         resultsDropdown.style.display = 'none';
     }
     
-    function toggleHighlight(enable) {
-        state.markersEnabled = enable;
-        updateToggleVisual();
-        updateStatusIndicator();
-        
-        if (enable) {
-            applyMarkers();
-            statusDot.style.background = '#000000';
-            console.log('📍 Highlight Answers: ENABLED');
-        } else {
-            removeAllMarkers();
-            statusDot.style.background = '#444444';
-            console.log('📍 Highlight Answers: DISABLED');
-        }
-    }
-    
     function updateToggleVisual() {
         if (state.markersEnabled) {
             highlightSwitch.style.background = '#444444';
@@ -845,18 +705,8 @@
     }
     
     function updateStatusIndicator() {
-        let statusMessages = [];
-        
-        if (state.autoAnswerEnabled) {
-            statusMessages.push(`Auto: ON (${state.pointsPerQuestion} pts)`);
-        }
-        
         if (state.markersEnabled) {
-            statusMessages.push('Highlight: ON');
-        }
-        
-        if (statusMessages.length > 0) {
-            statusText.textContent = statusMessages.join(' | ');
+            statusText.textContent = 'Highlight: ON';
             statusIndicator.style.opacity = '1';
         } else {
             statusIndicator.style.opacity = '0';
@@ -874,27 +724,11 @@
                 state.visible = !state.visible;
                 ui.style.opacity = state.visible ? '1' : '0';
                 ui.style.pointerEvents = state.visible ? 'all' : 'none';
-                console.log(`👁️ UI ${state.visible ? 'shown' : 'hidden'}`);
             }
             
             if (key === CONFIG.markersToggleKey) {
                 e.preventDefault();
-                toggleHighlight(!state.markersEnabled);
-            }
-            
-            if (key === CONFIG.autoAnswerToggleKey) {
-                e.preventDefault();
-                state.autoAnswerEnabled = !state.autoAnswerEnabled;
-                autoCheckbox.checked = state.autoAnswerEnabled;
-                autoCheckbox.dispatchEvent(new Event('change'));
-            }
-            
-            if (key === CONFIG.clearConsoleKey) {
-                e.preventDefault();
-                console.clear();
-                console.log('🧹 Console cleared');
-                console.log('🎮 Michael\'s Kahoot Cheats v7.3');
-                console.log('📊 Current state:', state);
+                toggleMarkers();
             }
             
             if (key === CONFIG.selfDestructKey) {
@@ -910,9 +744,7 @@
         state.currentQuestion = -1;
         state.currentQuizId = null;
         state.markedAnswers.clear();
-        state.lastAnsweredQuestion = -1;
-        state.isAnswering = false;
-        state.ILSetQuestion = -1;
+        state.lastQuestionCheck = -1;
         
         removeAllMarkers();
         
@@ -922,25 +754,16 @@
         
         searchInput.value = '';
         
-        state.autoAnswerEnabled = false;
-        autoCheckbox.checked = false;
-        autoCheckbox.dispatchEvent(new Event('change'));
-        
         state.markersEnabled = false;
         updateToggleVisual();
         updateStatusIndicator();
-        
-        console.log('🗑️ Quiz unloaded');
     }
     
     function selfDestruct() {
         if (!state.active) return;
         
-        console.log('💣 Self-destruct initiated');
-        
         state.active = false;
         state.markersEnabled = false;
-        state.autoAnswerEnabled = false;
         
         unloadQuiz();
         
@@ -964,28 +787,26 @@
             
             state.markers.clear();
             document.onkeydown = null;
-            console.log('💀 Script destroyed');
         }, 200);
     }
     
     async function fetchQuiz(quizId) {
         if (!quizId) return;
         
-        showLoading();
-        console.log(`🔍 Fetching quiz: ${quizId}`);
+        resultsDropdown.innerHTML = '<div style="padding: 10px; color: #ffffff; text-align: center;">Loading...</div>';
+        resultsDropdown.style.display = 'block';
         
         try {
             const response = await fetch(`${CONFIG.apiEndpoint}${encodeURIComponent(quizId)}`);
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+                throw new Error();
             }
             
             const data = await response.json();
             processQuizData(data, quizId);
             hideResults();
             
-        } catch (error) {
-            console.error('Fetch quiz error:', error);
+        } catch {
             resultsDropdown.innerHTML = '<div style="padding: 10px; color: #ffffff; text-align: center;">Failed to load quiz</div>';
             resultsDropdown.style.display = 'block';
             setTimeout(hideResults, 2000);
@@ -999,9 +820,6 @@
         state.lastQuestionCheck = -1;
         state.currentQuizId = quizId;
         state.markedAnswers.clear();
-        state.lastAnsweredQuestion = -1;
-        state.isAnswering = false;
-        state.ILSetQuestion = -1;
         
         removeAllMarkers();
         
@@ -1011,11 +829,10 @@
         unloadButton.style.display = 'block';
         searchInput.value = quizId;
         
+        // If markers are enabled, check immediately
         if (state.markersEnabled) {
-            applyMarkers();
+            checkAndApplyMarkers(true);
         }
-        
-        console.log(`📚 Quiz loaded: ${state.questions.length} questions`);
     }
     
     function parseQuestions(questions) {
@@ -1050,33 +867,16 @@
             if (currentQuestion !== state.currentQuestion && currentQuestion >= 0) {
                 state.currentQuestion = currentQuestion;
                 state.markedAnswers.clear();
-                state.isAnswering = false;
                 onQuestionChange();
             }
             
-            // AUTO-ANSWER LOGIC - REVISED
-            if (state.autoAnswerEnabled && 
-                state.currentQuestion >= 0 && 
-                state.currentQuestion < state.questions.length &&
-                !state.isAnswering &&
-                state.lastAnsweredQuestion !== state.currentQuestion) {
-                
-                const question = state.questions[state.currentQuestion];
-                if (question && question.correctIndices && question.correctIndices.length > 0) {
-                    // Check if answer buttons are available
-                    const hasAnswerButtons = document.querySelector('[data-functional-selector^="answer-"]');
-                    if (hasAnswerButtons) {
-                        console.log(`🚀 Auto-answer triggered for question ${state.currentQuestion + 1}`);
-                        console.log(`📝 Question type: ${question.type}, Correct index: ${question.correctIndices[0]}`);
-                        state.lastAnsweredQuestion = state.currentQuestion;
-                        state.isAnswering = true;
-                        state.ILSetQuestion = state.currentQuestion;
-                        triggerAutoAnswer(question);
-                    }
+            // CONTINUOUS MARKER CHECKING WHEN ENABLED
+            if (state.markersEnabled) {
+                const now = Date.now();
+                if (now - state.lastMarkerCheck > state.markerCheckInterval) {
+                    state.lastMarkerCheck = now;
+                    checkAndApplyMarkers(false); // Regular check
                 }
-            }
-            
-            if (state.markersEnabled && state.currentQuestion >= 0) {
                 maintainMarkers();
             }
         }, CONFIG.detectionInterval);
@@ -1090,7 +890,6 @@
             if (match) return parseInt(match[1]) - 1;
         }
         
-        // Alternative detection
         const altCounter = document.querySelector('.question-index-counter, .counter, [class*="question"]');
         if (altCounter) {
             const text = altCounter.textContent.trim();
@@ -1108,239 +907,121 @@
         
         removeAllMarkers();
         
+        // If markers are enabled, check immediately on question change
         if (state.markersEnabled) {
-            applyMarkers();
+            checkAndApplyMarkers(true);
         }
-        
-        console.log(`🔄 Question changed to: ${state.currentQuestion + 1}`);
     }
     
-    function triggerAutoAnswer(question) {
-        if (!question || !question.correctIndices || question.correctIndices.length === 0) {
-            state.isAnswering = false;
-            return;
-        }
-        
-        // KAOX ALGORITHM
-        const ppt = state.pointsPerQuestion;
-        const questionTime = question.time || 10000;
-        
-        let answerTime;
-        
-        if (ppt <= 500) {
-            answerTime = questionTime - 100;
-        } else if (ppt >= 1000) {
-            answerTime = 100;
-        } else {
-            answerTime = questionTime - (questionTime / (500/(ppt-500))) - state.inputLagCompensation;
-            answerTime = Math.max(100, Math.min(answerTime, questionTime - 100));
-        }
-        
-        console.log(`⏱️ Auto-answer delay: ${answerTime}ms, Points: ${ppt}, Question time: ${questionTime}ms`);
-        
-        setTimeout(() => {
-            if (!state.active || !state.autoAnswerEnabled || state.currentQuestion !== state.lastAnsweredQuestion) {
-                state.isAnswering = false;
-                return;
-            }
-            
-            const correctIndex = question.correctIndices[0];
-            
-            if (question.type === 'multiple_select_quiz') {
-                // Multiple select
-                const correctIndices = question.correctIndices;
-                
-                correctIndices.forEach((index, i) => {
-                    setTimeout(() => {
-                        const answerButton = findAnswerButton(index);
-                        if (answerButton) {
-                            console.log(`🖱️ Clicking multiple select answer ${index + 1}`);
-                            simulateClick(answerButton);
-                        }
-                    }, i * 60);
-                });
-                
-                setTimeout(() => {
-                    const submitButton = document.querySelector('[data-functional-selector="multi-select-submit-button"]');
-                    if (submitButton) {
-                        console.log('📤 Submitting multiple choice');
-                        simulateClick(submitButton);
-                    }
-                }, correctIndices.length * 60 + 50);
-                
-            } else {
-                // Single answer
-                const answerButton = findAnswerButton(correctIndex);
-                if (answerButton) {
-                    console.log(`🎯 Clicking answer ${correctIndex + 1}`);
-                    simulateClick(answerButton);
-                    
-                    // Try keyboard as backup
-                    setTimeout(() => {
-                        const key = (correctIndex + 1).toString();
-                        console.log(`⌨️ Sending keyboard event: ${key}`);
-                        sendKeyboardEvent(key);
-                    }, 50);
-                } else {
-                    console.log(`❌ Answer button ${correctIndex} not found, trying keyboard`);
-                    const key = (correctIndex + 1).toString();
-                    sendKeyboardEvent(key);
-                }
-            }
-            
-            state.isAnswering = false;
-            state.answeredPPT = ppt;
-            
-        }, answerTime);
-    }
-    
-    function findAnswerButton(index) {
-        // Try multiple selectors
-        const selectors = [
-            `[data-functional-selector="answer-${index}"]`,
-            `button[data-functional-selector="answer-${index}"]`,
-            `.answer-${index}`,
-            `[data-answer-index="${index}"]`,
-            `button:nth-child(${index + 1})`,
-            `.choice-${index}`
-        ];
-        
-        for (const selector of selectors) {
-            const button = document.querySelector(selector);
-            if (button) {
-                console.log(`✅ Found button with selector: ${selector}`);
-                return button;
-            }
-        }
-        
-        // Last resort: find all buttons and pick by position
-        const allButtons = document.querySelectorAll('button');
-        if (allButtons.length > index) {
-            console.log(`✅ Found button by position: ${index}`);
-            return allButtons[index];
-        }
-        
-        return null;
-    }
-    
-    function simulateClick(element) {
-        if (!element) return false;
-        
-        // Method 1: Direct click
-        try {
-            element.click();
-            console.log('✅ Direct click executed');
-        } catch (e) {
-            console.log('⚠️ Direct click failed:', e.message);
-        }
-        
-        // Method 2: Mouse events
-        try {
-            const mouseDown = new MouseEvent('mousedown', {
-                view: window,
-                bubbles: true,
-                cancelable: true
-            });
-            element.dispatchEvent(mouseDown);
-            
-            const mouseUp = new MouseEvent('mouseup', {
-                view: window,
-                bubbles: true,
-                cancelable: true
-            });
-            element.dispatchEvent(mouseUp);
-            
-            const click = new MouseEvent('click', {
-                view: window,
-                bubbles: true,
-                cancelable: true
-            });
-            element.dispatchEvent(click);
-            
-            console.log('✅ Mouse events dispatched');
-        } catch (e) {
-            console.log('⚠️ Mouse events failed:', e.message);
-        }
-        
-        // Method 3: Focus and press
-        try {
-            element.focus();
-            element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter' }));
-            console.log('✅ Focus + Enter dispatched');
-        } catch (e) {
-            console.log('⚠️ Focus method failed:', e.message);
-        }
-        
-        return true;
-    }
-    
-    function sendKeyboardEvent(key) {
-        const event = new KeyboardEvent('keydown', {
-            key: key,
-            code: `Digit${key}`,
-            keyCode: 48 + parseInt(key),
-            which: 48 + parseInt(key),
-            bubbles: true,
-            cancelable: true,
-            composed: true
-        });
-        
-        window.dispatchEvent(event);
-        document.dispatchEvent(event);
-        
-        console.log(`✅ Keyboard event dispatched: ${key}`);
-    }
-    
-    function applyMarkers() {
+    function checkAndApplyMarkers(forceImmediate = false) {
         if (!state.markersEnabled || state.currentQuestion < 0 || 
             state.currentQuestion >= state.questions.length) {
             return;
         }
         
         const question = state.questions[state.currentQuestion];
-        if (!question.correctIndices || question.correctIndices.length === 0) {
+        if (!question || !question.correctIndices || question.correctIndices.length === 0) {
             return;
         }
-        
-        removeAllMarkers();
         
         const correctIndex = question.correctIndices[0];
         if (correctIndex === undefined) return;
         
-        let attempts = 0;
-        const maxAttempts = 20;
+        // If we already have a marker for this answer, skip
+        if (state.markedAnswers.has(correctIndex)) {
+            return;
+        }
         
-        const tryApplyMarker = () => {
-            attempts++;
-            
-            const button = findAnswerButton(correctIndex);
-            if (button && !state.markers.has(button)) {
-                const position = POSITION_MAP[correctIndex] || 'bottom-right';
-                
-                const marker = document.createElement('div');
-                marker.className = 'michaels-corner-marker';
-                marker.setAttribute('data-position', position);
-                
-                if (getComputedStyle(button).position === 'static') {
-                    button.style.position = 'relative';
-                }
-                
-                button.appendChild(marker);
-                state.markers.set(button, marker);
-                state.markedAnswers.add(correctIndex);
-                console.log(`📍 Marker placed on answer ${correctIndex + 1}`);
-            } else if (!button && attempts < maxAttempts) {
-                setTimeout(tryApplyMarker, 100);
+        // Get the correct corner position
+        const cornerPosition = CORNER_MAP[correctIndex] || 'bottom-right';
+        
+        if (forceImmediate) {
+            // Immediate attempt with no delay
+            const answerButton = findAnswerButton(correctIndex);
+            if (answerButton) {
+                placeMarker(answerButton, cornerPosition, correctIndex);
             }
-        };
+        } else {
+            // Regular check with retry logic
+            let attempts = 0;
+            const maxAttempts = 5;
+            
+            const tryApplyMarker = () => {
+                attempts++;
+                
+                const answerButton = findAnswerButton(correctIndex);
+                if (answerButton && !state.markers.has(answerButton)) {
+                    placeMarker(answerButton, cornerPosition, correctIndex);
+                } else if (!answerButton && attempts < maxAttempts) {
+                    setTimeout(tryApplyMarker, 100);
+                }
+            };
+            
+            tryApplyMarker();
+        }
+    }
+    
+    function placeMarker(button, cornerPosition, answerIndex) {
+        const marker = document.createElement('div');
+        marker.className = 'kahoot-marker';
+        marker.setAttribute('data-position', cornerPosition);
+        marker.setAttribute('data-answer', answerIndex);
         
-        tryApplyMarker();
+        // Ensure button has proper positioning
+        if (getComputedStyle(button).position === 'static') {
+            button.style.position = 'relative';
+        }
+        
+        button.appendChild(marker);
+        state.markers.set(button, marker);
+        state.markedAnswers.add(answerIndex);
+    }
+    
+    function findAnswerButton(index) {
+        // Multiple selector attempts
+        const selectors = [
+            `button[data-functional-selector="answer-${index}"]`,
+            `[data-functional-selector="answer-${index}"]`,
+            `.answer-${index}`,
+            `[data-answer-index="${index}"]`,
+            `button[data-index="${index}"]`,
+            `.choice-${index}`,
+            `[data-testid="answer-${index}"]`
+        ];
+        
+        for (const selector of selectors) {
+            const button = document.querySelector(selector);
+            if (button) return button;
+        }
+        
+        // Fallback: all answer buttons
+        const allAnswerButtons = document.querySelectorAll('button[data-functional-selector^="answer-"]');
+        if (allAnswerButtons.length > index) {
+            return allAnswerButtons[index];
+        }
+        
+        // Last resort: all buttons
+        const allButtons = document.querySelectorAll('button');
+        if (allButtons.length > index) {
+            // Filter to only answer-like buttons (ones that look like answers)
+            const answerLikeButtons = Array.from(allButtons).filter(btn => {
+                const text = btn.textContent || '';
+                return text.length > 0 && text.length < 100; // Answers are usually short
+            });
+            
+            if (answerLikeButtons.length > index) {
+                return answerLikeButtons[index];
+            }
+        }
+        
+        return null;
     }
     
     function maintainMarkers() {
         state.markers.forEach((marker, button) => {
             if (!document.body.contains(button) || !document.body.contains(marker)) {
                 state.markers.delete(button);
+                state.markedAnswers.delete(parseInt(marker.getAttribute('data-answer')));
                 return;
             }
             
@@ -1358,7 +1039,7 @@
             if (marker && marker.parentNode === button) {
                 button.removeChild(marker);
                 
-                if (button.style.position === 'relative') {
+                if (button.style.position === 'relative' && button.children.length === 0) {
                     button.style.position = '';
                 }
             }
@@ -1367,7 +1048,8 @@
         state.markers.clear();
         state.markedAnswers.clear();
         
-        const allMarkers = document.querySelectorAll('.michaels-corner-marker');
+        // Clean up any orphaned markers
+        const allMarkers = document.querySelectorAll('.kahoot-marker');
         allMarkers.forEach(marker => {
             if (marker.parentNode) {
                 marker.parentNode.removeChild(marker);
