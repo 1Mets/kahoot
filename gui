@@ -1,0 +1,1428 @@
+// ==UserScript==
+// @name         Michael's Kahoot Cheats
+// @version      7.3
+// @description  Kahoot cheats
+// @namespace    https://
+// @match        https://kahoot.it/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+    
+    // === CONFIGURATION ===
+    const CONFIG = {
+        uiToggleKey: 'q',
+        markersToggleKey: 'b',
+        autoAnswerToggleKey: 'a',
+        selfDestructKey: 'x',
+        clearConsoleKey: 'p',
+        ctrlRequired: true,
+        markerColor: '#000000',
+        markerSize: '6px',
+        detectionInterval: 50,
+        apiEndpoint: 'https://damp-leaf-16aa.johnwee.workers.dev/api-proxy/',
+        searchEndpoint: 'https://damp-leaf-16aa.johnwee.workers.dev/rest/kahoots/',
+        defaultPoints: 900,
+        minPoints: 500,
+        maxPoints: 1000,
+        inputLag: 100
+    };
+    
+    // === POSITION MAPPING ===
+    const POSITION_MAP = {
+        0: 'bottom-right',
+        1: 'top-right',
+        2: 'bottom-left',
+        3: 'top-left'
+    };
+    
+    // === STATE MANAGEMENT ===
+    let state = {
+        visible: true,
+        questions: [],
+        currentQuestion: -1,
+        gamePin: null,
+        quizLoaded: false,
+        isMinimized: false,
+        markersEnabled: false,
+        active: true,
+        markers: new Map(),
+        lastQuestionCheck: -1,
+        searchResults: [],
+        isSearching: false,
+        currentQuizId: null,
+        markedAnswers: new Set(),
+        // AUTO-ANSWER SYSTEM - IMPROVED
+        autoAnswerEnabled: false,
+        pointsPerQuestion: CONFIG.defaultPoints,
+        lastAnsweredQuestion: -1,
+        isAnswering: false,
+        inputLagCompensation: CONFIG.inputLag,
+        answeredPPT: CONFIG.defaultPoints,
+        ILSetQuestion: -1
+    };
+    
+    // === DARK UI CREATION ===
+    const ui = document.createElement('div');
+    Object.assign(ui.style, {
+        position: 'fixed',
+        top: '30px',
+        left: '30px',
+        width: '380px',
+        backgroundColor: '#000000',
+        borderRadius: '12px',
+        boxShadow: '0 10px 40px rgba(0, 0, 0, 0.9)',
+        zIndex: '99999',
+        fontFamily: '"Segoe UI", "Roboto", sans-serif',
+        border: '1px solid #222222',
+        transition: 'all 0.25s ease',
+        overflow: 'hidden'
+    });
+    
+    // Drag Header - WITH DEMON EMOJI 😈
+    const header = document.createElement('div');
+    Object.assign(header.style, {
+        padding: '16px 20px',
+        background: 'linear-gradient(135deg, #111111 0%, #000000 100%)',
+        cursor: 'move',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        borderBottom: '1px solid #222222',
+        userSelect: 'none'
+    });
+    
+    const title = document.createElement('div');
+    title.innerHTML = '<span style="color:#ffffff;font-size:20px;margin-right:10px">😈</span><span style="color:#ffffff;font-weight:600;font-size:16px">Michael\'s Kahoot Cheats v7.3</span>';
+    header.appendChild(title);
+    
+    const controls = document.createElement('div');
+    controls.style.display = 'flex';
+    controls.style.gap = '8px';
+    
+    const minimizeBtn = createControlBtn('−', '#222222');
+    const closeBtn = createControlBtn('×', '#444444');
+    
+    controls.appendChild(minimizeBtn);
+    controls.appendChild(closeBtn);
+    header.appendChild(controls);
+    ui.appendChild(header);
+    
+    // Content Area
+    const content = document.createElement('div');
+    content.style.padding = '20px';
+    
+    // Quiz Lookup Section
+    const lookupSection = document.createElement('div');
+    lookupSection.style.marginBottom = '20px';
+    
+    const lookupLabel = document.createElement('div');
+    lookupLabel.textContent = 'QUIZ LOOKUP';
+    Object.assign(lookupLabel.style, {
+        color: '#ffffff',
+        fontSize: '11px',
+        fontWeight: '600',
+        letterSpacing: '1px',
+        marginBottom: '10px',
+        textTransform: 'uppercase'
+    });
+    
+    // Input with dropdown
+    const lookupContainer = document.createElement('div');
+    lookupContainer.style.position = 'relative';
+    
+    const searchInput = document.createElement('input');
+    Object.assign(searchInput.style, {
+        width: '100%',
+        padding: '12px 40px 12px 12px',
+        background: '#111111',
+        border: '2px solid #222222',
+        borderRadius: '8px',
+        color: '#ffffff',
+        outline: 'none',
+        fontSize: '14px',
+        boxSizing: 'border-box'
+    });
+    searchInput.placeholder = 'Search quiz name or paste Quiz ID...';
+    searchInput.id = 'searchInput';
+    
+    const searchIcon = document.createElement('div');
+    searchIcon.innerHTML = '🔍';
+    Object.assign(searchIcon.style, {
+        position: 'absolute',
+        right: '12px',
+        top: '50%',
+        transform: 'translateY(-50%)',
+        color: '#ffffff',
+        cursor: 'pointer',
+        fontSize: '16px'
+    });
+    
+    lookupContainer.appendChild(searchInput);
+    lookupContainer.appendChild(searchIcon);
+    
+    // Search results dropdown
+    const resultsDropdown = document.createElement('div');
+    resultsDropdown.id = 'resultsDropdown';
+    Object.assign(resultsDropdown.style, {
+        position: 'absolute',
+        top: '100%',
+        left: '0',
+        width: '100%',
+        maxHeight: '200px',
+        overflowY: 'auto',
+        backgroundColor: '#111111',
+        border: '1px solid #222222',
+        borderRadius: '8px',
+        marginTop: '5px',
+        display: 'none',
+        zIndex: '100000'
+    });
+    
+    lookupContainer.appendChild(resultsDropdown);
+    lookupSection.appendChild(lookupLabel);
+    lookupSection.appendChild(lookupContainer);
+    content.appendChild(lookupSection);
+    
+    // Features Section
+    const featuresSection = document.createElement('div');
+    featuresSection.style.marginBottom = '20px';
+    
+    const featuresLabel = document.createElement('div');
+    featuresLabel.textContent = 'FEATURES';
+    Object.assign(featuresLabel.style, {
+        color: '#ffffff',
+        fontSize: '11px',
+        fontWeight: '600',
+        letterSpacing: '1px',
+        marginBottom: '12px',
+        textTransform: 'uppercase'
+    });
+    
+    const featuresGrid = document.createElement('div');
+    featuresGrid.style.display = 'grid';
+    featuresGrid.style.gridTemplateColumns = '1fr';
+    featuresGrid.style.gap = '12px';
+    
+    // === AUTO ANSWER CONTROLS ===
+    const autoAnswerContainer = document.createElement('div');
+    autoAnswerContainer.style.cssText = `
+        padding: 12px;
+        background: #111111;
+        border-radius: 8px;
+        border: 1px solid #222222;
+    `;
+    
+    // Auto Answer Toggle Row
+    const autoToggleRow = document.createElement('div');
+    autoToggleRow.style.cssText = `
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+    `;
+    
+    const autoLabel = document.createElement('span');
+    autoLabel.textContent = 'Auto Answer (Ctrl+A)';
+    autoLabel.style.cssText = `
+        color: #ffffff;
+        font-size: 14px;
+        font-weight: 500;
+    `;
+    
+    // Toggle Switch for Auto Answer
+    const autoToggleWrapper = document.createElement('div');
+    autoToggleWrapper.style.cssText = `
+        position: relative;
+        width: 44px;
+        height: 24px;
+    `;
+    
+    const autoCheckbox = document.createElement('input');
+    autoCheckbox.type = 'checkbox';
+    autoCheckbox.id = 'autoAnswerToggle';
+    autoCheckbox.style.cssText = `
+        opacity: 0;
+        width: 0;
+        height: 0;
+    `;
+    
+    const autoSlider = document.createElement('span');
+    autoSlider.style.cssText = `
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #222222;
+        transition: .4s;
+        border-radius: 12px;
+    `;
+    
+    const autoKnob = document.createElement('span');
+    autoKnob.style.cssText = `
+        position: absolute;
+        height: 18px;
+        width: 18px;
+        left: 3px;
+        bottom: 3px;
+        background-color: #666666;
+        transition: .4s;
+        border-radius: 50%;
+    `;
+    
+    autoSlider.appendChild(autoKnob);
+    autoToggleWrapper.appendChild(autoCheckbox);
+    autoToggleWrapper.appendChild(autoSlider);
+    
+    autoToggleRow.appendChild(autoLabel);
+    autoToggleRow.appendChild(autoToggleWrapper);
+    autoAnswerContainer.appendChild(autoToggleRow);
+    
+    // Points Slider
+    const pointsSliderContainer = document.createElement('div');
+    pointsSliderContainer.style.cssText = `
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid #222222;
+    `;
+    
+    const pointsLabel = document.createElement('div');
+    pointsLabel.id = 'pointsLabel';
+    pointsLabel.textContent = `Points per Answer: ~${state.pointsPerQuestion}`;
+    pointsLabel.style.cssText = `
+        color: #ffffff;
+        font-size: 13px;
+        margin-bottom: 8px;
+    `;
+    
+    const pointsSlider = document.createElement('input');
+    pointsSlider.type = 'range';
+    pointsSlider.min = CONFIG.minPoints.toString();
+    pointsSlider.max = CONFIG.maxPoints.toString();
+    pointsSlider.value = state.pointsPerQuestion.toString();
+    pointsSlider.id = 'pointsSlider';
+    pointsSlider.style.cssText = `
+        width: 100%;
+        height: 6px;
+        background: #222222;
+        border-radius: 3px;
+        outline: none;
+        -webkit-appearance: none;
+        appearance: none;
+    `;
+    
+    // Custom slider thumb
+    const sliderStyle = document.createElement('style');
+    sliderStyle.textContent = `
+        #pointsSlider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #ffffff;
+            cursor: pointer;
+            border: 2px solid #222222;
+        }
+        #pointsSlider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #ffffff;
+            cursor: pointer;
+            border: 2px solid #222222;
+        }
+    `;
+    document.head.appendChild(sliderStyle);
+    
+    pointsSliderContainer.appendChild(pointsLabel);
+    pointsSliderContainer.appendChild(pointsSlider);
+    autoAnswerContainer.appendChild(pointsSliderContainer);
+    
+    featuresGrid.appendChild(autoAnswerContainer);
+    
+    // Highlight Answers Toggle
+    const highlightToggle = document.createElement('div');
+    highlightToggle.style.cssText = `
+        padding: 12px;
+        background: #111111;
+        border-radius: 8px;
+        border: 1px solid #222222;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        user-select: none;
+        transition: all 0.2s;
+    `;
+    
+    const highlightLabel = document.createElement('span');
+    highlightLabel.textContent = 'Highlight Answers (Ctrl+B)';
+    highlightLabel.style.cssText = `
+        color: #ffffff;
+        font-size: 14px;
+        font-weight: 500;
+    `;
+    
+    const highlightSwitch = document.createElement('div');
+    highlightSwitch.id = 'highlightSwitch';
+    highlightSwitch.style.cssText = `
+        position: relative;
+        width: 44px;
+        height: 24px;
+        background: #222222;
+        border-radius: 12px;
+        transition: all 0.3s;
+    `;
+    
+    const highlightKnob = document.createElement('div');
+    highlightKnob.id = 'highlightKnob';
+    highlightKnob.style.cssText = `
+        position: absolute;
+        width: 18px;
+        height: 18px;
+        background: #666666;
+        border-radius: 50%;
+        top: 3px;
+        left: 3px;
+        transition: all 0.3s;
+        transform: translateX(0);
+    `;
+    
+    highlightSwitch.appendChild(highlightKnob);
+    highlightToggle.appendChild(highlightLabel);
+    highlightToggle.appendChild(highlightSwitch);
+    featuresGrid.appendChild(highlightToggle);
+    
+    featuresSection.appendChild(featuresLabel);
+    featuresSection.appendChild(featuresGrid);
+    content.appendChild(featuresSection);
+    
+    // Status Indicator (Simplified - only shows when features active)
+    const statusIndicator = document.createElement('div');
+    statusIndicator.id = 'statusIndicator';
+    statusIndicator.style.cssText = `
+        padding: 8px 12px;
+        background: #111111;
+        border-radius: 6px;
+        margin-bottom: 15px;
+        font-size: 12px;
+        color: #ffffff;
+        border: 1px solid #222222;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        opacity: 0;
+        transition: opacity 0.3s;
+    `;
+    
+    const statusDot = document.createElement('div');
+    statusDot.id = 'statusDot';
+    statusDot.style.cssText = `
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #444444;
+        transition: background 0.3s;
+    `;
+    
+    const statusText = document.createElement('span');
+    statusText.id = 'statusText';
+    statusText.textContent = '';
+    
+    statusIndicator.appendChild(statusDot);
+    statusIndicator.appendChild(statusText);
+    featuresSection.appendChild(statusIndicator);
+    
+    // Game Info Section
+    const infoSection = document.createElement('div');
+    
+    const infoLabel = document.createElement('div');
+    infoLabel.textContent = 'GAME INFO';
+    Object.assign(infoLabel.style, {
+        color: '#ffffff',
+        fontSize: '11px',
+        fontWeight: '600',
+        letterSpacing: '1px',
+        marginBottom: '12px',
+        textTransform: 'uppercase'
+    });
+    
+    const infoCard = document.createElement('div');
+    Object.assign(infoCard.style, {
+        background: '#111111',
+        borderRadius: '8px',
+        padding: '15px',
+        border: '1px solid #222222'
+    });
+    
+    const quizInfoContainer = document.createElement('div');
+    quizInfoContainer.style.cssText = `
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+    `;
+    
+    const questionDisplay = document.createElement('div');
+    questionDisplay.id = 'questionDisplay';
+    questionDisplay.textContent = 'Questions: 0/0';
+    Object.assign(questionDisplay.style, {
+        color: '#ffffff',
+        fontSize: '13px'
+    });
+    
+    const unloadButton = document.createElement('button');
+    unloadButton.id = 'unloadButton';
+    unloadButton.textContent = 'Unload';
+    Object.assign(unloadButton.style, {
+        padding: '4px 12px',
+        background: '#444444',
+        color: '#ffffff',
+        border: 'none',
+        borderRadius: '4px',
+        fontSize: '11px',
+        fontWeight: '600',
+        cursor: 'pointer',
+        opacity: '0.7',
+        display: 'none',
+        transition: 'all 0.2s'
+    });
+    
+    quizInfoContainer.appendChild(questionDisplay);
+    quizInfoContainer.appendChild(unloadButton);
+    
+    const pinDisplay = document.createElement('div');
+    pinDisplay.id = 'pinDisplay';
+    pinDisplay.textContent = 'Game PIN: None';
+    Object.assign(pinDisplay.style, {
+        color: '#ffffff',
+        fontSize: '13px',
+        fontWeight: '500',
+        marginTop: '8px'
+    });
+    
+    infoCard.appendChild(quizInfoContainer);
+    infoCard.appendChild(pinDisplay);
+    infoSection.appendChild(infoLabel);
+    infoSection.appendChild(infoCard);
+    content.appendChild(infoSection);
+    
+    // Status Bar
+    const statusBar = document.createElement('div');
+    Object.assign(statusBar.style, {
+        marginTop: '20px',
+        padding: '10px',
+        background: '#111111',
+        borderRadius: '6px',
+        fontSize: '11px',
+        color: '#ffffff',
+        textAlign: 'center',
+        border: '1px solid #222222'
+    });
+    statusBar.innerHTML = `
+        Toggle UI: <kbd style="background:#222222;padding:2px 6px;border-radius:4px;color:#ffffff">Ctrl+Q</kbd> 
+        | Auto Answer: <kbd style="background:#222222;padding:2px 6px;border-radius:4px;color:#ffffff">Ctrl+A</kbd>
+        | Highlight: <kbd style="background:#222222;padding:2px 6px;border-radius:4px;color:#ffffff">Ctrl+B</kbd>
+        | Clear Console: <kbd style="background:#222222;padding:2px 6px;border-radius:4px;color:#ffffff">Ctrl+P</kbd>
+        | Destroy: <kbd style="background:#333333;padding:2px 6px;border-radius:4px;color:#ffffff">Ctrl+X</kbd>
+    `;
+    
+    content.appendChild(statusBar);
+    ui.appendChild(content);
+    document.body.appendChild(ui);
+    
+    // === MARKER STYLE ===
+    const markerStyle = document.createElement('style');
+    markerStyle.id = 'corner-marker-style';
+    markerStyle.textContent = `
+        .michaels-corner-marker {
+            position: absolute !important;
+            width: ${CONFIG.markerSize} !important;
+            height: ${CONFIG.markerSize} !important;
+            background-color: ${CONFIG.markerColor} !important;
+            border-radius: 1px !important;
+            pointer-events: none !important;
+            z-index: 10000 !important;
+        }
+        
+        .michaels-corner-marker[data-position="top-left"] {
+            top: 4px !important;
+            left: 4px !important;
+        }
+        
+        .michaels-corner-marker[data-position="top-right"] {
+            top: 4px !important;
+            right: 4px !important;
+        }
+        
+        .michaels-corner-marker[data-position="bottom-left"] {
+            bottom: 4px !important;
+            left: 4px !important;
+        }
+        
+        .michaels-corner-marker[data-position="bottom-right"] {
+            bottom: 4px !important;
+            right: 4px !important;
+        }
+        
+        button[data-functional-selector^="answer-"] {
+            position: relative !important;
+        }
+    `;
+    document.head.appendChild(markerStyle);
+    
+    // === INITIALIZATION ===
+    initialize();
+    
+    function initialize() {
+        setupDrag();
+        setupControls();
+        setupKeyboard();
+        startMonitoring();
+        updateToggleVisual();
+        updateStatusIndicator();
+        
+        // Clear console on start
+        console.clear();
+        console.log('🎮 Michael\'s Kahoot Cheats v7.3 loaded');
+        console.log('📊 State:', state);
+        console.log('🛠️  Hotkeys: Ctrl+Q (UI), Ctrl+A (Auto), Ctrl+B (Highlight), Ctrl+P (Clear Console), Ctrl+X (Destroy)');
+    }
+    
+    function setupDrag() {
+        let isDragging = false;
+        let offset = { x: 0, y: 0 };
+        
+        header.addEventListener('mousedown', startDrag);
+        document.addEventListener('mousemove', drag);
+        document.addEventListener('mouseup', stopDrag);
+        
+        function startDrag(e) {
+            isDragging = true;
+            const rect = ui.getBoundingClientRect();
+            offset.x = e.clientX - rect.left;
+            offset.y = e.clientY - rect.top;
+        }
+        
+        function drag(e) {
+            if (!isDragging) return;
+            
+            const x = e.clientX - offset.x;
+            const y = e.clientY - offset.y;
+            
+            const maxX = window.innerWidth - ui.offsetWidth;
+            const maxY = window.innerHeight - ui.offsetHeight;
+            
+            ui.style.left = Math.max(0, Math.min(x, maxX)) + 'px';
+            ui.style.top = Math.max(0, Math.min(y, maxY)) + 'px';
+        }
+        
+        function stopDrag() {
+            isDragging = false;
+        }
+    }
+    
+    function setupControls() {
+        // Minimize/Close
+        minimizeBtn.addEventListener('click', () => {
+            state.isMinimized = !state.isMinimized;
+            content.style.display = state.isMinimized ? 'none' : 'block';
+            minimizeBtn.textContent = state.isMinimized ? '+' : '−';
+        });
+        
+        closeBtn.addEventListener('click', selfDestruct);
+        
+        // Search functionality
+        searchIcon.addEventListener('click', () => {
+            performSearch(searchInput.value.trim());
+        });
+        
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                performSearch(searchInput.value.trim());
+            }
+        });
+        
+        searchInput.addEventListener('input', (e) => {
+            const query = searchInput.value.trim();
+            if (query.length >= 3) {
+                clearTimeout(searchInput.timeout);
+                searchInput.timeout = setTimeout(() => {
+                    performSearch(query);
+                }, 300);
+            } else if (query.length === 0) {
+                hideResults();
+            }
+        });
+        
+        document.addEventListener('click', (e) => {
+            if (!lookupContainer.contains(e.target)) {
+                hideResults();
+            }
+        });
+        
+        // Auto Answer Toggle
+        autoCheckbox.addEventListener('change', function() {
+            state.autoAnswerEnabled = this.checked;
+            if (this.checked) {
+                autoSlider.style.backgroundColor = '#444444';
+                autoKnob.style.transform = 'translateX(20px)';
+                autoKnob.style.backgroundColor = '#ffffff';
+                console.log('✅ Auto Answer: ENABLED');
+            } else {
+                autoSlider.style.backgroundColor = '#222222';
+                autoKnob.style.transform = 'translateX(0)';
+                autoKnob.style.backgroundColor = '#666666';
+                console.log('⛔ Auto Answer: DISABLED');
+            }
+            updateStatusIndicator();
+        });
+        
+        // Points Slider
+        pointsSlider.addEventListener('input', function() {
+            state.pointsPerQuestion = parseInt(this.value);
+            state.answeredPPT = state.pointsPerQuestion;
+            pointsLabel.textContent = `Points per Answer: ~${state.pointsPerQuestion}`;
+            console.log(`🎯 Points set to: ${state.pointsPerQuestion}`);
+        });
+        
+        // Highlight Answers Toggle
+        highlightToggle.addEventListener('click', () => {
+            toggleHighlight(!state.markersEnabled);
+        });
+        
+        unloadButton.addEventListener('click', unloadQuiz);
+        unloadButton.addEventListener('mouseenter', () => {
+            unloadButton.style.opacity = '1';
+        });
+        unloadButton.addEventListener('mouseleave', () => {
+            unloadButton.style.opacity = '0.7';
+        });
+    }
+    
+    function performSearch(query) {
+        if (!query || state.isSearching) return;
+        
+        const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidPattern.test(query)) {
+            fetchQuiz(query);
+            hideResults();
+            return;
+        }
+        
+        state.isSearching = true;
+        showLoading();
+        
+        const searchUrl = `${CONFIG.searchEndpoint}?query=${encodeURIComponent(query)}`;
+        
+        fetch(searchUrl)
+            .then(response => {
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.json();
+            })
+            .then(data => {
+                if (data.entities) {
+                    state.searchResults = data.entities;
+                } else if (Array.isArray(data)) {
+                    state.searchResults = data;
+                } else {
+                    state.searchResults = [];
+                }
+                displayResults();
+                state.isSearching = false;
+            })
+            .catch(error => {
+                console.error('Search error:', error);
+                resultsDropdown.innerHTML = '<div style="padding: 10px; color: #ffffff; text-align: center;">Search failed. Try a Quiz ID instead.</div>';
+                resultsDropdown.style.display = 'block';
+                state.isSearching = false;
+            });
+    }
+    
+    function showLoading() {
+        resultsDropdown.innerHTML = '<div style="padding: 10px; color: #ffffff; text-align: center;">Searching...</div>';
+        resultsDropdown.style.display = 'block';
+    }
+    
+    function displayResults() {
+        if (state.searchResults.length === 0) {
+            resultsDropdown.innerHTML = '<div style="padding: 10px; color: #ffffff; text-align: center;">No quizzes found</div>';
+            resultsDropdown.style.display = 'block';
+            return;
+        }
+        
+        resultsDropdown.innerHTML = '';
+        
+        state.searchResults.forEach((result) => {
+            const card = result.card || result;
+            if (!card || !card.uuid) return;
+            
+            const item = document.createElement('div');
+            item.style.cssText = `
+                padding: 12px;
+                border-bottom: 1px solid #222;
+                cursor: pointer;
+                transition: background 0.2s;
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            `;
+            
+            const quizName = card.title || card.name || 'Untitled Quiz';
+            const questionCount = card.number_of_questions || card.questions_count || card.number_of_questions || '?';
+            
+            item.innerHTML = `
+                <div style="color: #ffffff; font-size: 13px; font-weight: 500;">${quizName}</div>
+                <div style="color: #cccccc; font-size: 11px; display: flex; align-items: center; gap: 8px;">
+                    <span>${questionCount} questions</span>
+                    <button style="margin-left: auto; background: #444; color: white; border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer;">Load</button>
+                </div>
+            `;
+            
+            item.addEventListener('mouseenter', () => {
+                item.style.background = '#222';
+            });
+            
+            item.addEventListener('mouseleave', () => {
+                item.style.background = 'transparent';
+            });
+            
+            item.addEventListener('click', (e) => {
+                if (e.target.tagName !== 'BUTTON') {
+                    searchInput.value = card.uuid;
+                    hideResults();
+                    fetchQuiz(card.uuid);
+                }
+            });
+            
+            item.querySelector('button').addEventListener('click', (e) => {
+                e.stopPropagation();
+                searchInput.value = card.uuid;
+                hideResults();
+                fetchQuiz(card.uuid);
+            });
+            
+            resultsDropdown.appendChild(item);
+        });
+        
+        resultsDropdown.style.display = 'block';
+    }
+    
+    function hideResults() {
+        resultsDropdown.style.display = 'none';
+    }
+    
+    function toggleHighlight(enable) {
+        state.markersEnabled = enable;
+        updateToggleVisual();
+        updateStatusIndicator();
+        
+        if (enable) {
+            applyMarkers();
+            statusDot.style.background = '#000000';
+            console.log('📍 Highlight Answers: ENABLED');
+        } else {
+            removeAllMarkers();
+            statusDot.style.background = '#444444';
+            console.log('📍 Highlight Answers: DISABLED');
+        }
+    }
+    
+    function updateToggleVisual() {
+        if (state.markersEnabled) {
+            highlightSwitch.style.background = '#444444';
+            highlightKnob.style.transform = 'translateX(20px)';
+            highlightKnob.style.background = '#ffffff';
+        } else {
+            highlightSwitch.style.background = '#222222';
+            highlightKnob.style.transform = 'translateX(0)';
+            highlightKnob.style.background = '#666666';
+        }
+    }
+    
+    function updateStatusIndicator() {
+        let statusMessages = [];
+        
+        if (state.autoAnswerEnabled) {
+            statusMessages.push(`Auto: ON (${state.pointsPerQuestion} pts)`);
+        }
+        
+        if (state.markersEnabled) {
+            statusMessages.push('Highlight: ON');
+        }
+        
+        if (statusMessages.length > 0) {
+            statusText.textContent = statusMessages.join(' | ');
+            statusIndicator.style.opacity = '1';
+        } else {
+            statusIndicator.style.opacity = '0';
+        }
+    }
+    
+    function setupKeyboard() {
+        document.addEventListener('keydown', (e) => {
+            if (!e.ctrlKey) return;
+            
+            const key = e.key.toLowerCase();
+            
+            if (key === CONFIG.uiToggleKey) {
+                e.preventDefault();
+                state.visible = !state.visible;
+                ui.style.opacity = state.visible ? '1' : '0';
+                ui.style.pointerEvents = state.visible ? 'all' : 'none';
+                console.log(`👁️ UI ${state.visible ? 'shown' : 'hidden'}`);
+            }
+            
+            if (key === CONFIG.markersToggleKey) {
+                e.preventDefault();
+                toggleHighlight(!state.markersEnabled);
+            }
+            
+            if (key === CONFIG.autoAnswerToggleKey) {
+                e.preventDefault();
+                state.autoAnswerEnabled = !state.autoAnswerEnabled;
+                autoCheckbox.checked = state.autoAnswerEnabled;
+                autoCheckbox.dispatchEvent(new Event('change'));
+            }
+            
+            if (key === CONFIG.clearConsoleKey) {
+                e.preventDefault();
+                console.clear();
+                console.log('🧹 Console cleared');
+                console.log('🎮 Michael\'s Kahoot Cheats v7.3');
+                console.log('📊 Current state:', state);
+            }
+            
+            if (key === CONFIG.selfDestructKey) {
+                e.preventDefault();
+                selfDestruct();
+            }
+        });
+    }
+    
+    function unloadQuiz() {
+        state.questions = [];
+        state.quizLoaded = false;
+        state.currentQuestion = -1;
+        state.currentQuizId = null;
+        state.markedAnswers.clear();
+        state.lastAnsweredQuestion = -1;
+        state.isAnswering = false;
+        state.ILSetQuestion = -1;
+        
+        removeAllMarkers();
+        
+        questionDisplay.textContent = 'Questions: 0/0';
+        questionDisplay.style.color = '#ffffff';
+        unloadButton.style.display = 'none';
+        
+        searchInput.value = '';
+        
+        state.autoAnswerEnabled = false;
+        autoCheckbox.checked = false;
+        autoCheckbox.dispatchEvent(new Event('change'));
+        
+        state.markersEnabled = false;
+        updateToggleVisual();
+        updateStatusIndicator();
+        
+        console.log('🗑️ Quiz unloaded');
+    }
+    
+    function selfDestruct() {
+        if (!state.active) return;
+        
+        console.log('💣 Self-destruct initiated');
+        
+        state.active = false;
+        state.markersEnabled = false;
+        state.autoAnswerEnabled = false;
+        
+        unloadQuiz();
+        
+        if (window.michaelsMonitoringInterval) {
+            clearInterval(window.michaelsMonitoringInterval);
+        }
+        
+        document.removeEventListener('keydown', setupKeyboard);
+        
+        if (markerStyle.parentNode) {
+            markerStyle.parentNode.removeChild(markerStyle);
+        }
+        
+        ui.style.transform = 'scale(0.8)';
+        ui.style.opacity = '0';
+        
+        setTimeout(() => {
+            if (ui.parentNode) {
+                ui.parentNode.removeChild(ui);
+            }
+            
+            state.markers.clear();
+            document.onkeydown = null;
+            console.log('💀 Script destroyed');
+        }, 200);
+    }
+    
+    async function fetchQuiz(quizId) {
+        if (!quizId) return;
+        
+        showLoading();
+        console.log(`🔍 Fetching quiz: ${quizId}`);
+        
+        try {
+            const response = await fetch(`${CONFIG.apiEndpoint}${encodeURIComponent(quizId)}`);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const data = await response.json();
+            processQuizData(data, quizId);
+            hideResults();
+            
+        } catch (error) {
+            console.error('Fetch quiz error:', error);
+            resultsDropdown.innerHTML = '<div style="padding: 10px; color: #ffffff; text-align: center;">Failed to load quiz</div>';
+            resultsDropdown.style.display = 'block';
+            setTimeout(hideResults, 2000);
+        }
+    }
+    
+    function processQuizData(data, quizId) {
+        state.questions = parseQuestions(data.questions || []);
+        state.quizLoaded = true;
+        state.currentQuestion = -1;
+        state.lastQuestionCheck = -1;
+        state.currentQuizId = quizId;
+        state.markedAnswers.clear();
+        state.lastAnsweredQuestion = -1;
+        state.isAnswering = false;
+        state.ILSetQuestion = -1;
+        
+        removeAllMarkers();
+        
+        questionDisplay.textContent = `Questions: ${state.questions.length} loaded`;
+        questionDisplay.style.color = '#ffffff';
+        
+        unloadButton.style.display = 'block';
+        searchInput.value = quizId;
+        
+        if (state.markersEnabled) {
+            applyMarkers();
+        }
+        
+        console.log(`📚 Quiz loaded: ${state.questions.length} questions`);
+    }
+    
+    function parseQuestions(questions) {
+        return questions.map(q => {
+            const parsed = {
+                type: q.type,
+                time: q.time || 10000,
+                choices: q.choices || []
+            };
+            
+            if (['quiz', 'multiple_select_quiz', 'true_false', 'open_ended'].includes(q.type)) {
+                parsed.correctIndices = [];
+                
+                q.choices.forEach((choice, index) => {
+                    if (choice.correct) {
+                        parsed.correctIndices.push(index);
+                    }
+                });
+            }
+            
+            return parsed;
+        });
+    }
+    
+    function startMonitoring() {
+        window.michaelsMonitoringInterval = setInterval(() => {
+            if (!state.active) return;
+            
+            detectGamePin();
+            
+            const currentQuestion = detectCurrentQuestion();
+            if (currentQuestion !== state.currentQuestion && currentQuestion >= 0) {
+                state.currentQuestion = currentQuestion;
+                state.markedAnswers.clear();
+                state.isAnswering = false;
+                onQuestionChange();
+            }
+            
+            // AUTO-ANSWER LOGIC - REVISED
+            if (state.autoAnswerEnabled && 
+                state.currentQuestion >= 0 && 
+                state.currentQuestion < state.questions.length &&
+                !state.isAnswering &&
+                state.lastAnsweredQuestion !== state.currentQuestion) {
+                
+                const question = state.questions[state.currentQuestion];
+                if (question && question.correctIndices && question.correctIndices.length > 0) {
+                    // Check if answer buttons are available
+                    const hasAnswerButtons = document.querySelector('[data-functional-selector^="answer-"]');
+                    if (hasAnswerButtons) {
+                        console.log(`🚀 Auto-answer triggered for question ${state.currentQuestion + 1}`);
+                        console.log(`📝 Question type: ${question.type}, Correct index: ${question.correctIndices[0]}`);
+                        state.lastAnsweredQuestion = state.currentQuestion;
+                        state.isAnswering = true;
+                        state.ILSetQuestion = state.currentQuestion;
+                        triggerAutoAnswer(question);
+                    }
+                }
+            }
+            
+            if (state.markersEnabled && state.currentQuestion >= 0) {
+                maintainMarkers();
+            }
+        }, CONFIG.detectionInterval);
+    }
+    
+    function detectCurrentQuestion() {
+        const questionCounter = document.querySelector('[data-functional-selector="question-index-counter"]');
+        if (questionCounter) {
+            const text = questionCounter.textContent.trim();
+            const match = text.match(/(\d+)/);
+            if (match) return parseInt(match[1]) - 1;
+        }
+        
+        // Alternative detection
+        const altCounter = document.querySelector('.question-index-counter, .counter, [class*="question"]');
+        if (altCounter) {
+            const text = altCounter.textContent.trim();
+            const match = text.match(/(\d+)/);
+            if (match) return parseInt(match[1]) - 1;
+        }
+        
+        return -1;
+    }
+    
+    function onQuestionChange() {
+        if (state.questions.length > 0) {
+            questionDisplay.textContent = `Question: ${state.currentQuestion + 1}/${state.questions.length}`;
+        }
+        
+        removeAllMarkers();
+        
+        if (state.markersEnabled) {
+            applyMarkers();
+        }
+        
+        console.log(`🔄 Question changed to: ${state.currentQuestion + 1}`);
+    }
+    
+    function triggerAutoAnswer(question) {
+        if (!question || !question.correctIndices || question.correctIndices.length === 0) {
+            state.isAnswering = false;
+            return;
+        }
+        
+        // KAOX ALGORITHM
+        const ppt = state.pointsPerQuestion;
+        const questionTime = question.time || 10000;
+        
+        let answerTime;
+        
+        if (ppt <= 500) {
+            answerTime = questionTime - 100;
+        } else if (ppt >= 1000) {
+            answerTime = 100;
+        } else {
+            answerTime = questionTime - (questionTime / (500/(ppt-500))) - state.inputLagCompensation;
+            answerTime = Math.max(100, Math.min(answerTime, questionTime - 100));
+        }
+        
+        console.log(`⏱️ Auto-answer delay: ${answerTime}ms, Points: ${ppt}, Question time: ${questionTime}ms`);
+        
+        setTimeout(() => {
+            if (!state.active || !state.autoAnswerEnabled || state.currentQuestion !== state.lastAnsweredQuestion) {
+                state.isAnswering = false;
+                return;
+            }
+            
+            const correctIndex = question.correctIndices[0];
+            
+            if (question.type === 'multiple_select_quiz') {
+                // Multiple select
+                const correctIndices = question.correctIndices;
+                
+                correctIndices.forEach((index, i) => {
+                    setTimeout(() => {
+                        const answerButton = findAnswerButton(index);
+                        if (answerButton) {
+                            console.log(`🖱️ Clicking multiple select answer ${index + 1}`);
+                            simulateClick(answerButton);
+                        }
+                    }, i * 60);
+                });
+                
+                setTimeout(() => {
+                    const submitButton = document.querySelector('[data-functional-selector="multi-select-submit-button"]');
+                    if (submitButton) {
+                        console.log('📤 Submitting multiple choice');
+                        simulateClick(submitButton);
+                    }
+                }, correctIndices.length * 60 + 50);
+                
+            } else {
+                // Single answer
+                const answerButton = findAnswerButton(correctIndex);
+                if (answerButton) {
+                    console.log(`🎯 Clicking answer ${correctIndex + 1}`);
+                    simulateClick(answerButton);
+                    
+                    // Try keyboard as backup
+                    setTimeout(() => {
+                        const key = (correctIndex + 1).toString();
+                        console.log(`⌨️ Sending keyboard event: ${key}`);
+                        sendKeyboardEvent(key);
+                    }, 50);
+                } else {
+                    console.log(`❌ Answer button ${correctIndex} not found, trying keyboard`);
+                    const key = (correctIndex + 1).toString();
+                    sendKeyboardEvent(key);
+                }
+            }
+            
+            state.isAnswering = false;
+            state.answeredPPT = ppt;
+            
+        }, answerTime);
+    }
+    
+    function findAnswerButton(index) {
+        // Try multiple selectors
+        const selectors = [
+            `[data-functional-selector="answer-${index}"]`,
+            `button[data-functional-selector="answer-${index}"]`,
+            `.answer-${index}`,
+            `[data-answer-index="${index}"]`,
+            `button:nth-child(${index + 1})`,
+            `.choice-${index}`
+        ];
+        
+        for (const selector of selectors) {
+            const button = document.querySelector(selector);
+            if (button) {
+                console.log(`✅ Found button with selector: ${selector}`);
+                return button;
+            }
+        }
+        
+        // Last resort: find all buttons and pick by position
+        const allButtons = document.querySelectorAll('button');
+        if (allButtons.length > index) {
+            console.log(`✅ Found button by position: ${index}`);
+            return allButtons[index];
+        }
+        
+        return null;
+    }
+    
+    function simulateClick(element) {
+        if (!element) return false;
+        
+        // Method 1: Direct click
+        try {
+            element.click();
+            console.log('✅ Direct click executed');
+        } catch (e) {
+            console.log('⚠️ Direct click failed:', e.message);
+        }
+        
+        // Method 2: Mouse events
+        try {
+            const mouseDown = new MouseEvent('mousedown', {
+                view: window,
+                bubbles: true,
+                cancelable: true
+            });
+            element.dispatchEvent(mouseDown);
+            
+            const mouseUp = new MouseEvent('mouseup', {
+                view: window,
+                bubbles: true,
+                cancelable: true
+            });
+            element.dispatchEvent(mouseUp);
+            
+            const click = new MouseEvent('click', {
+                view: window,
+                bubbles: true,
+                cancelable: true
+            });
+            element.dispatchEvent(click);
+            
+            console.log('✅ Mouse events dispatched');
+        } catch (e) {
+            console.log('⚠️ Mouse events failed:', e.message);
+        }
+        
+        // Method 3: Focus and press
+        try {
+            element.focus();
+            element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter' }));
+            console.log('✅ Focus + Enter dispatched');
+        } catch (e) {
+            console.log('⚠️ Focus method failed:', e.message);
+        }
+        
+        return true;
+    }
+    
+    function sendKeyboardEvent(key) {
+        const event = new KeyboardEvent('keydown', {
+            key: key,
+            code: `Digit${key}`,
+            keyCode: 48 + parseInt(key),
+            which: 48 + parseInt(key),
+            bubbles: true,
+            cancelable: true,
+            composed: true
+        });
+        
+        window.dispatchEvent(event);
+        document.dispatchEvent(event);
+        
+        console.log(`✅ Keyboard event dispatched: ${key}`);
+    }
+    
+    function applyMarkers() {
+        if (!state.markersEnabled || state.currentQuestion < 0 || 
+            state.currentQuestion >= state.questions.length) {
+            return;
+        }
+        
+        const question = state.questions[state.currentQuestion];
+        if (!question.correctIndices || question.correctIndices.length === 0) {
+            return;
+        }
+        
+        removeAllMarkers();
+        
+        const correctIndex = question.correctIndices[0];
+        if (correctIndex === undefined) return;
+        
+        let attempts = 0;
+        const maxAttempts = 20;
+        
+        const tryApplyMarker = () => {
+            attempts++;
+            
+            const button = findAnswerButton(correctIndex);
+            if (button && !state.markers.has(button)) {
+                const position = POSITION_MAP[correctIndex] || 'bottom-right';
+                
+                const marker = document.createElement('div');
+                marker.className = 'michaels-corner-marker';
+                marker.setAttribute('data-position', position);
+                
+                if (getComputedStyle(button).position === 'static') {
+                    button.style.position = 'relative';
+                }
+                
+                button.appendChild(marker);
+                state.markers.set(button, marker);
+                state.markedAnswers.add(correctIndex);
+                console.log(`📍 Marker placed on answer ${correctIndex + 1}`);
+            } else if (!button && attempts < maxAttempts) {
+                setTimeout(tryApplyMarker, 100);
+            }
+        };
+        
+        tryApplyMarker();
+    }
+    
+    function maintainMarkers() {
+        state.markers.forEach((marker, button) => {
+            if (!document.body.contains(button) || !document.body.contains(marker)) {
+                state.markers.delete(button);
+                return;
+            }
+            
+            if (!button.contains(marker)) {
+                if (getComputedStyle(button).position === 'static') {
+                    button.style.position = 'relative';
+                }
+                button.appendChild(marker);
+            }
+        });
+    }
+    
+    function removeAllMarkers() {
+        state.markers.forEach((marker, button) => {
+            if (marker && marker.parentNode === button) {
+                button.removeChild(marker);
+                
+                if (button.style.position === 'relative') {
+                    button.style.position = '';
+                }
+            }
+        });
+        
+        state.markers.clear();
+        state.markedAnswers.clear();
+        
+        const allMarkers = document.querySelectorAll('.michaels-corner-marker');
+        allMarkers.forEach(marker => {
+            if (marker.parentNode) {
+                marker.parentNode.removeChild(marker);
+            }
+        });
+    }
+    
+    function detectGamePin() {
+        const pinInput = document.querySelector('input[name="gameId"], input[placeholder*="PIN"]');
+        if (pinInput && pinInput.value) {
+            state.gamePin = pinInput.value;
+            pinDisplay.textContent = `Game PIN: ${state.gamePin}`;
+            return;
+        }
+        
+        const elements = document.querySelectorAll('[data-functional-selector*="pin"], .game-pin, .pin');
+        for (const el of elements) {
+            const text = el.textContent || el.innerText;
+            const match = text.match(/\d{4,8}/);
+            if (match) {
+                state.gamePin = match[0];
+                pinDisplay.textContent = `Game PIN: ${state.gamePin}`;
+                return;
+            }
+        }
+    }
+    
+    // === HELPER FUNCTIONS ===
+    
+    function createControlBtn(text, bgColor) {
+        const btn = document.createElement('button');
+        btn.textContent = text;
+        Object.assign(btn.style, {
+            width: '28px',
+            height: '28px',
+            borderRadius: '6px',
+            background: bgColor,
+            border: 'none',
+            color: '#ffffff',
+            cursor: 'pointer',
+            fontSize: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'all 0.2s'
+        });
+        
+        btn.addEventListener('mouseenter', () => {
+            btn.style.transform = 'scale(1.1)';
+        });
+        
+        btn.addEventListener('mouseleave', () => {
+            btn.style.transform = 'scale(1)';
+        });
+        
+        return btn;
+    }
+})();
