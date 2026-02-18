@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Michael's Kahoot Cheats
-// @version      9.8
-// @description  Undetectable Kahoot Cheats -- Password Protected -- No Risk
+// @version      10.3
+// @description  Ultimate undetectable Kahoot cheats with Quiz Browser
 // @namespace    https://
 // @match        https://kahoot.it/*
 // @grant        none
@@ -9,6 +9,53 @@
 
 (function() {
     'use strict';
+    
+    // === STEALTH CONSOLE - ABSOLUTELY NO CLEARING, JUST FILTERING ===
+    (function stealthConsole() {
+        if (!window.console) return;
+        
+        const originalLog = console.log;
+        const originalError = console.error;
+        const originalWarn = console.warn;
+        const originalInfo = console.info;
+        const originalDebug = console.debug;
+        
+        const filterKeywords = [
+            'michaels', 'kahoot', 'marker', 'revealer', 'locker', 
+            'password', 'unlock', 'authenticated', 'config', 
+            'localstorage', 'cheat', 'hack', '5189', 'michael',
+            'highlight', 'answer', 'toggle', 'switch', 'knob',
+            'dropdown', 'settings', 'panel', 'ui', 'initialize',
+            'fetch', 'quiz', 'search', 'results', 'dropdown',
+            'monitoring', 'interval', 'keyboard', 'handler',
+            'apply', 'remove', 'show', 'hide', 'enable', 'disable'
+        ];
+        
+        const shouldFilter = (args) => {
+            try {
+                const argsStr = JSON.stringify(args).toLowerCase();
+                return filterKeywords.some(keyword => argsStr.includes(keyword.toLowerCase()));
+            } catch {
+                return false;
+            }
+        };
+        
+        console.log = function(...args) { 
+            if (!shouldFilter(args)) originalLog.apply(console, args); 
+        };
+        console.error = function(...args) { 
+            if (!shouldFilter(args)) originalError.apply(console, args); 
+        };
+        console.warn = function(...args) { 
+            if (!shouldFilter(args)) originalWarn.apply(console, args); 
+        };
+        console.info = function(...args) { 
+            if (!shouldFilter(args)) originalInfo.apply(console, args); 
+        };
+        console.debug = function(...args) { 
+            if (!shouldFilter(args)) originalDebug.apply(console, args); 
+        };
+    })();
     
     // === PASSWORD CONFIGURATION ===
     const PASSWORD = '5189';
@@ -18,6 +65,7 @@
     const DEFAULTS = {
         highlightMode: 'legit',
         revealerMode: 'legit',
+        lockerEnabled: false,
         markerColor: '#000000',
         markerSize: '8px',
         detectionInterval: 100,
@@ -46,22 +94,28 @@
     let state = {
         visible: true,
         questions: [],
+        questionsData: [], // Store full question data including text and choices
         currentQuestion: -1,
         gamePin: null,
         quizLoaded: false,
         markersEnabled: false,
         revealerEnabled: false,
+        lockerEnabled: CONFIG.lockerEnabled,
         highlightMode: CONFIG.highlightMode,
         revealerMode: CONFIG.revealerMode,
         active: true,
         currentQuizId: null,
+        currentQuizTitle: '',
         isSearching: false,
         settingsOpen: false,
+        quizBrowserOpen: false,
         ui: null,
         highlightSwitch: null,
         highlightKnob: null,
         revealerSwitch: null,
         revealerKnob: null,
+        lockerSwitch: null,
+        lockerKnob: null,
         highlightModeIndicator: null,
         revealerModeIndicator: null,
         questionDisplay: null,
@@ -71,7 +125,9 @@
         highlightDropdown: null,
         revealerDropdown: null,
         highlightArrow: null,
-        revealerArrow: null
+        revealerArrow: null,
+        quizBrowserContainer: null,
+        quizBrowserArrow: null
     };
     
     // === TINY PASSWORD OVERLAY ===
@@ -211,7 +267,7 @@
         });
         
         const title = document.createElement('div');
-        title.innerHTML = '<span style="color:#6c5ce7;font-size:20px;margin-right:10px">😈</span><span style="color:#ffffff;font-weight:600;font-size:16px">Michael\'s Kahoot Cheats v9.8</span>';
+        title.innerHTML = '<span style="color:#6c5ce7;font-size:20px;margin-right:10px">😈</span><span style="color:#ffffff;font-weight:600;font-size:16px">Michael\'s Kahoot Cheats</span>';
         header.appendChild(title);
         
         const headerButtons = document.createElement('div');
@@ -253,7 +309,7 @@
             textTransform: 'uppercase'
         });
         
-        // Keybinds display (ONLY HERE - removed from bottom)
+        // Keybinds display
         const keybindsContainer = document.createElement('div');
         keybindsContainer.style.marginBottom = '15px';
         
@@ -279,7 +335,9 @@
             { key: 'Q', action: 'Toggle UI' },
             { key: 'B', action: 'Toggle Highlight' },
             { key: 'R', action: 'Toggle Revealer' },
+            { key: 'L', action: 'Toggle Answer Locker' },
             { key: 'X', action: 'Self Destruct' }
+            // Ctrl+P is HIDDEN - not shown here
         ];
         
         shortcuts.forEach(s => {
@@ -329,12 +387,16 @@
             CONFIG = { ...DEFAULTS };
             state.highlightMode = DEFAULTS.highlightMode;
             state.revealerMode = DEFAULTS.revealerMode;
+            state.lockerEnabled = DEFAULTS.lockerEnabled;
             localStorage.setItem('michaelsKahootConfig', JSON.stringify(CONFIG));
             
             updateModeIndicators();
+            updateAllSwitches();
             
             if (state.markersEnabled) applyHighlight();
             if (state.revealerEnabled) showRevealer();
+            if (state.lockerEnabled) enableAnswerLocker();
+            else disableAnswerLocker();
         });
         
         settingsPanel.appendChild(settingsTitle);
@@ -409,12 +471,12 @@
         lookupSection.appendChild(lookupContainer);
         content.appendChild(lookupSection);
         
-        // === HIGHLIGHT SECTION ===
-        const highlightSection = document.createElement('div');
-        highlightSection.style.marginBottom = '15px';
+        // === QUIZ BROWSER SECTION (NEW) ===
+        const quizBrowserSection = document.createElement('div');
+        quizBrowserSection.style.marginBottom = '20px';
         
-        const highlightHeader = document.createElement('div');
-        highlightHeader.style.cssText = `
+        const quizBrowserHeader = document.createElement('div');
+        quizBrowserHeader.style.cssText = `
             padding: 12px;
             background: #1a1a24;
             border-radius: 8px;
@@ -426,278 +488,106 @@
             user-select: none;
         `;
         
-        const highlightLeft = document.createElement('div');
-        highlightLeft.style.display = 'flex';
-        highlightLeft.style.alignItems = 'center';
-        highlightLeft.style.gap = '12px';
+        const quizBrowserLeft = document.createElement('div');
+        quizBrowserLeft.style.display = 'flex';
+        quizBrowserLeft.style.alignItems = 'center';
+        quizBrowserLeft.style.gap = '8px';
         
-        const highlightLabel = document.createElement('span');
-        highlightLabel.textContent = 'Highlight Answers';
-        highlightLabel.style.cssText = `
+        const quizBrowserIcon = document.createElement('span');
+        quizBrowserIcon.innerHTML = '📚';
+        quizBrowserIcon.style.fontSize = '16px';
+        
+        const quizBrowserTitle = document.createElement('span');
+        quizBrowserTitle.textContent = 'Quiz Browser';
+        quizBrowserTitle.style.cssText = `
             color: #ffffff;
             font-size: 14px;
             font-weight: 500;
         `;
         
-        state.highlightModeIndicator = document.createElement('span');
-        state.highlightModeIndicator.id = 'highlightModeIndicator';
-        state.highlightModeIndicator.textContent = `[${state.highlightMode.toUpperCase()}]`;
-        state.highlightModeIndicator.style.cssText = `
-            color: ${state.highlightMode === 'legit' ? '#888888' : '#ff4757'};
-            font-size: 11px;
-            font-weight: 600;
-            background: #222222;
-            padding: 2px 6px;
-            border-radius: 4px;
+        const quizBrowserCount = document.createElement('span');
+        quizBrowserCount.id = 'quizBrowserCount';
+        quizBrowserCount.textContent = '(0)';
+        quizBrowserCount.style.cssText = `
+            color: #888888;
+            font-size: 12px;
         `;
         
-        highlightLeft.appendChild(highlightLabel);
-        highlightLeft.appendChild(state.highlightModeIndicator);
+        quizBrowserLeft.appendChild(quizBrowserIcon);
+        quizBrowserLeft.appendChild(quizBrowserTitle);
+        quizBrowserLeft.appendChild(quizBrowserCount);
         
-        const highlightRight = document.createElement('div');
-        highlightRight.style.display = 'flex';
-        highlightRight.style.alignItems = 'center';
-        highlightRight.style.gap = '12px';
+        state.quizBrowserArrow = document.createElement('div');
+        state.quizBrowserArrow.innerHTML = '▼';
+        state.quizBrowserArrow.style.color = '#ffffff';
+        state.quizBrowserArrow.style.fontSize = '12px';
         
-        state.highlightSwitch = document.createElement('div');
-        state.highlightSwitch.style.cssText = `
-            position: relative;
-            width: 44px;
-            height: 24px;
-            background: ${state.markersEnabled ? '#6c5ce7' : '#2a2a35'};
-            border-radius: 12px;
-        `;
+        quizBrowserHeader.appendChild(quizBrowserLeft);
+        quizBrowserHeader.appendChild(state.quizBrowserArrow);
         
-        state.highlightKnob = document.createElement('div');
-        state.highlightKnob.style.cssText = `
-            position: absolute;
-            width: 18px;
-            height: 18px;
-            background: ${state.markersEnabled ? '#ffffff' : '#888888'};
-            border-radius: 50%;
-            top: 3px;
-            left: ${state.markersEnabled ? '23px' : '3px'};
-            transition: left 0.2s;
-        `;
-        state.highlightSwitch.appendChild(state.highlightKnob);
-        
-        state.highlightArrow = document.createElement('div');
-        state.highlightArrow.innerHTML = '▼';
-        state.highlightArrow.style.color = '#ffffff';
-        state.highlightArrow.style.fontSize = '12px';
-        
-        highlightRight.appendChild(state.highlightSwitch);
-        highlightRight.appendChild(state.highlightArrow);
-        
-        highlightHeader.appendChild(highlightLeft);
-        highlightHeader.appendChild(highlightRight);
-        
-        state.highlightDropdown = document.createElement('div');
-        state.highlightDropdown.style.cssText = `
+        state.quizBrowserContainer = document.createElement('div');
+        state.quizBrowserContainer.style.cssText = `
             padding: 12px;
             background: #0a0a0a;
             border: 1px solid #2a2a35;
             border-top: none;
             border-radius: 0 0 8px 8px;
             display: none;
+            max-height: 300px;
+            overflow-y: auto;
         `;
         
-        const modeLabel = document.createElement('div');
-        modeLabel.textContent = 'HIGHLIGHT MODE';
-        Object.assign(modeLabel.style, {
-            color: '#888888',
-            fontSize: '10px',
+        quizBrowserSection.appendChild(quizBrowserHeader);
+        quizBrowserSection.appendChild(state.quizBrowserContainer);
+        content.appendChild(quizBrowserSection);
+        
+        // === FEATURES SECTION ===
+        const featuresSection = document.createElement('div');
+        featuresSection.style.marginBottom = '15px';
+        
+        const featuresLabel = document.createElement('div');
+        featuresLabel.textContent = 'FEATURES';
+        Object.assign(featuresLabel.style, {
+            color: '#6c5ce7',
+            fontSize: '11px',
             fontWeight: '600',
             letterSpacing: '1px',
-            marginBottom: '8px'
+            marginBottom: '12px',
+            textTransform: 'uppercase'
         });
+        featuresSection.appendChild(featuresLabel);
         
-        const modeButtons = document.createElement('div');
-        modeButtons.style.display = 'flex';
-        modeButtons.style.gap = '8px';
+        // HIGHLIGHT SECTION (with dropdown)
+        const highlightSection = createFeatureSection(
+            'Highlight Answers',
+            'highlight',
+            ['LEGIT', 'BLATANT'],
+            state.highlightMode,
+            state.markersEnabled
+        );
+        featuresSection.appendChild(highlightSection.container);
         
-        const legitHighlightBtn = document.createElement('button');
-        legitHighlightBtn.textContent = 'LEGIT';
-        Object.assign(legitHighlightBtn.style, {
-            flex: '1',
-            padding: '8px',
-            background: state.highlightMode === 'legit' ? '#6c5ce7' : '#222222',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '12px',
-            fontWeight: state.highlightMode === 'legit' ? '600' : '400'
-        });
+        // REVEALER SECTION (with dropdown)
+        const revealerSection = createFeatureSection(
+            'Answer Revealer',
+            'revealer',
+            ['LEGIT', 'BLATANT'],
+            state.revealerMode,
+            state.revealerEnabled
+        );
+        featuresSection.appendChild(revealerSection.container);
         
-        const blatantHighlightBtn = document.createElement('button');
-        blatantHighlightBtn.textContent = 'BLATANT';
-        Object.assign(blatantHighlightBtn.style, {
-            flex: '1',
-            padding: '8px',
-            background: state.highlightMode === 'blatant' ? '#ff4757' : '#222222',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '12px',
-            fontWeight: state.highlightMode === 'blatant' ? '600' : '400'
-        });
+        // ANSWER LOCKER SECTION (simple toggle)
+        const lockerSection = createSimpleToggle(
+            'Answer Locker (Ctrl+L)',
+            'locker',
+            state.lockerEnabled
+        );
+        featuresSection.appendChild(lockerSection.container);
         
-        modeButtons.appendChild(legitHighlightBtn);
-        modeButtons.appendChild(blatantHighlightBtn);
-        state.highlightDropdown.appendChild(modeLabel);
-        state.highlightDropdown.appendChild(modeButtons);
+        content.appendChild(featuresSection);
         
-        highlightSection.appendChild(highlightHeader);
-        highlightSection.appendChild(state.highlightDropdown);
-        content.appendChild(highlightSection);
-        
-        // === REVEALER SECTION ===
-        const revealerSection = document.createElement('div');
-        revealerSection.style.marginBottom = '20px';
-        
-        const revealerHeader = document.createElement('div');
-        revealerHeader.style.cssText = `
-            padding: 12px;
-            background: #1a1a24;
-            border-radius: 8px;
-            border: 1px solid #2a2a35;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            cursor: pointer;
-            user-select: none;
-        `;
-        
-        const revealerLeft = document.createElement('div');
-        revealerLeft.style.display = 'flex';
-        revealerLeft.style.alignItems = 'center';
-        revealerLeft.style.gap = '12px';
-        
-        const revealerLabel = document.createElement('span');
-        revealerLabel.textContent = 'Answer Revealer';
-        revealerLabel.style.cssText = `
-            color: #ffffff;
-            font-size: 14px;
-            font-weight: 500;
-        `;
-        
-        state.revealerModeIndicator = document.createElement('span');
-        state.revealerModeIndicator.id = 'revealerModeIndicator';
-        state.revealerModeIndicator.textContent = `[${state.revealerMode.toUpperCase()}]`;
-        state.revealerModeIndicator.style.cssText = `
-            color: ${state.revealerMode === 'legit' ? '#888888' : '#00ff00'};
-            font-size: 11px;
-            font-weight: 600;
-            background: #222222;
-            padding: 2px 6px;
-            border-radius: 4px;
-        `;
-        
-        revealerLeft.appendChild(revealerLabel);
-        revealerLeft.appendChild(state.revealerModeIndicator);
-        
-        const revealerRight = document.createElement('div');
-        revealerRight.style.display = 'flex';
-        revealerRight.style.alignItems = 'center';
-        revealerRight.style.gap = '12px';
-        
-        state.revealerSwitch = document.createElement('div');
-        state.revealerSwitch.style.cssText = `
-            position: relative;
-            width: 44px;
-            height: 24px;
-            background: ${state.revealerEnabled ? '#6c5ce7' : '#2a2a35'};
-            border-radius: 12px;
-        `;
-        
-        state.revealerKnob = document.createElement('div');
-        state.revealerKnob.style.cssText = `
-            position: absolute;
-            width: 18px;
-            height: 18px;
-            background: ${state.revealerEnabled ? '#ffffff' : '#888888'};
-            border-radius: 50%;
-            top: 3px;
-            left: ${state.revealerEnabled ? '23px' : '3px'};
-            transition: left 0.2s;
-        `;
-        state.revealerSwitch.appendChild(state.revealerKnob);
-        
-        state.revealerArrow = document.createElement('div');
-        state.revealerArrow.innerHTML = '▼';
-        state.revealerArrow.style.color = '#ffffff';
-        state.revealerArrow.style.fontSize = '12px';
-        
-        revealerRight.appendChild(state.revealerSwitch);
-        revealerRight.appendChild(state.revealerArrow);
-        
-        revealerHeader.appendChild(revealerLeft);
-        revealerHeader.appendChild(revealerRight);
-        
-        state.revealerDropdown = document.createElement('div');
-        state.revealerDropdown.style.cssText = `
-            padding: 12px;
-            background: #0a0a0a;
-            border: 1px solid #2a2a35;
-            border-top: none;
-            border-radius: 0 0 8px 8px;
-            display: none;
-        `;
-        
-        const revealerModeLabel = document.createElement('div');
-        revealerModeLabel.textContent = 'REVEALER MODE';
-        Object.assign(revealerModeLabel.style, {
-            color: '#888888',
-            fontSize: '10px',
-            fontWeight: '600',
-            letterSpacing: '1px',
-            marginBottom: '8px'
-        });
-        
-        const revealerModeButtons = document.createElement('div');
-        revealerModeButtons.style.display = 'flex';
-        revealerModeButtons.style.gap = '8px';
-        
-        const legitRevealerBtn = document.createElement('button');
-        legitRevealerBtn.textContent = 'LEGIT';
-        Object.assign(legitRevealerBtn.style, {
-            flex: '1',
-            padding: '8px',
-            background: state.revealerMode === 'legit' ? '#6c5ce7' : '#222222',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '12px',
-            fontWeight: state.revealerMode === 'legit' ? '600' : '400'
-        });
-        
-        const blatantRevealerBtn = document.createElement('button');
-        blatantRevealerBtn.textContent = 'BLATANT';
-        Object.assign(blatantRevealerBtn.style, {
-            flex: '1',
-            padding: '8px',
-            background: state.revealerMode === 'blatant' ? '#00ff00' : '#222222',
-            color: state.revealerMode === 'blatant' ? '#000000' : '#ffffff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '12px',
-            fontWeight: state.revealerMode === 'blatant' ? '600' : '400'
-        });
-        
-        revealerModeButtons.appendChild(legitRevealerBtn);
-        revealerModeButtons.appendChild(blatantRevealerBtn);
-        state.revealerDropdown.appendChild(revealerModeLabel);
-        state.revealerDropdown.appendChild(revealerModeButtons);
-        
-        revealerSection.appendChild(revealerHeader);
-        revealerSection.appendChild(state.revealerDropdown);
-        content.appendChild(revealerSection);
-        
-        // Game Info Section (NO KEYBINDS AT BOTTOM)
+        // Game Info Section
         const infoSection = document.createElement('div');
         
         const infoLabel = document.createElement('div');
@@ -742,8 +632,6 @@
         infoSection.appendChild(infoLabel);
         infoSection.appendChild(infoCard);
         content.appendChild(infoSection);
-        
-        // NO STATUS BAR / KEYBINDS AT BOTTOM - REMOVED COMPLETELY
         
         state.ui.appendChild(content);
         document.body.appendChild(state.ui);
@@ -813,10 +701,438 @@
                 border: none !important;
                 box-shadow: none !important;
             }
+            
+            .quiz-item {
+                margin-bottom: 8px;
+                border: 1px solid #2a2a35;
+                border-radius: 6px;
+                overflow: hidden;
+            }
+            
+            .quiz-header {
+                padding: 10px;
+                background: #1a1a24;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                color: #ffffff;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            
+            .quiz-header:hover {
+                background: #2a2a35;
+            }
+            
+            .quiz-content {
+                padding: 10px;
+                background: #0f0f13;
+                display: none;
+            }
+            
+            .quiz-question-item {
+                margin-bottom: 8px;
+                border: 1px solid #2a2a35;
+                border-radius: 4px;
+                overflow: hidden;
+            }
+            
+            .quiz-question-header {
+                padding: 8px;
+                background: #1a1a24;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                color: #ffffff;
+                font-size: 12px;
+            }
+            
+            .quiz-question-header:hover {
+                background: #2a2a35;
+            }
+            
+            .quiz-question-content {
+                padding: 10px;
+                background: #0a0a0a;
+                display: none;
+            }
+            
+            .quiz-answer {
+                padding: 6px 8px;
+                margin: 4px 0;
+                background: #1a1a24;
+                border-left: 3px solid #888888;
+                border-radius: 4px;
+                color: #ffffff;
+                font-size: 12px;
+            }
+            
+            .quiz-answer-correct {
+                border-left: 3px solid #00ff00;
+                background: rgba(0,255,0,0.1);
+                font-weight: 500;
+            }
+            
+            .quiz-answer-incorrect {
+                border-left: 3px solid #ff4757;
+                opacity: 0.8;
+            }
         `;
         document.head.appendChild(styleSheet);
         
-        // === FUNCTIONS ===
+        // === FEATURE CREATION FUNCTIONS ===
+        
+        function createFeatureSection(title, type, modes, currentMode, enabled) {
+            const container = document.createElement('div');
+            container.style.marginBottom = '10px';
+            
+            const header = document.createElement('div');
+            header.style.cssText = `
+                padding: 12px;
+                background: #1a1a24;
+                border-radius: 8px;
+                border: 1px solid #2a2a35;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                cursor: pointer;
+                user-select: none;
+            `;
+            
+            const leftDiv = document.createElement('div');
+            leftDiv.style.display = 'flex';
+            leftDiv.style.alignItems = 'center';
+            leftDiv.style.gap = '12px';
+            
+            const label = document.createElement('span');
+            label.textContent = title;
+            label.style.cssText = `
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: 500;
+            `;
+            
+            const modeIndicator = document.createElement('span');
+            modeIndicator.id = `${type}ModeIndicator`;
+            modeIndicator.textContent = `[${currentMode.toUpperCase()}]`;
+            modeIndicator.style.cssText = `
+                color: ${currentMode === 'legit' ? '#888888' : (type === 'highlight' ? '#ff4757' : '#00ff00')};
+                font-size: 11px;
+                font-weight: 600;
+                background: #222222;
+                padding: 2px 6px;
+                border-radius: 4px;
+            `;
+            
+            leftDiv.appendChild(label);
+            leftDiv.appendChild(modeIndicator);
+            
+            const rightDiv = document.createElement('div');
+            rightDiv.style.display = 'flex';
+            rightDiv.style.alignItems = 'center';
+            rightDiv.style.gap = '12px';
+            
+            const switchEl = document.createElement('div');
+            switchEl.style.cssText = `
+                position: relative;
+                width: 44px;
+                height: 24px;
+                background: ${enabled ? '#6c5ce7' : '#2a2a35'};
+                border-radius: 12px;
+            `;
+            
+            const knob = document.createElement('div');
+            knob.style.cssText = `
+                position: absolute;
+                width: 18px;
+                height: 18px;
+                background: ${enabled ? '#ffffff' : '#888888'};
+                border-radius: 50%;
+                top: 3px;
+                left: ${enabled ? '23px' : '3px'};
+                transition: left 0.2s;
+            `;
+            switchEl.appendChild(knob);
+            
+            const arrow = document.createElement('div');
+            arrow.innerHTML = '▼';
+            arrow.style.color = '#ffffff';
+            arrow.style.fontSize = '12px';
+            
+            rightDiv.appendChild(switchEl);
+            rightDiv.appendChild(arrow);
+            
+            header.appendChild(leftDiv);
+            header.appendChild(rightDiv);
+            
+            const dropdown = document.createElement('div');
+            dropdown.style.cssText = `
+                padding: 12px;
+                background: #0a0a0a;
+                border: 1px solid #2a2a35;
+                border-top: none;
+                border-radius: 0 0 8px 8px;
+                display: none;
+            `;
+            
+            const modeLabel = document.createElement('div');
+            modeLabel.textContent = `${title.toUpperCase()} MODE`;
+            Object.assign(modeLabel.style, {
+                color: '#888888',
+                fontSize: '10px',
+                fontWeight: '600',
+                letterSpacing: '1px',
+                marginBottom: '8px'
+            });
+            
+            const modeButtons = document.createElement('div');
+            modeButtons.style.display = 'flex';
+            modeButtons.style.gap = '8px';
+            
+            const legitBtn = document.createElement('button');
+            legitBtn.textContent = 'LEGIT';
+            Object.assign(legitBtn.style, {
+                flex: '1',
+                padding: '8px',
+                background: currentMode === 'legit' ? '#6c5ce7' : '#222222',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: currentMode === 'legit' ? '600' : '400'
+            });
+            
+            const blatantBtn = document.createElement('button');
+            blatantBtn.textContent = 'BLATANT';
+            Object.assign(blatantBtn.style, {
+                flex: '1',
+                padding: '8px',
+                background: currentMode === 'blatant' ? (type === 'highlight' ? '#ff4757' : '#00ff00') : '#222222',
+                color: currentMode === 'blatant' && type === 'revealer' ? '#000000' : '#ffffff',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: currentMode === 'blatant' ? '600' : '400'
+            });
+            
+            modeButtons.appendChild(legitBtn);
+            modeButtons.appendChild(blatantBtn);
+            dropdown.appendChild(modeLabel);
+            dropdown.appendChild(modeButtons);
+            
+            container.appendChild(header);
+            container.appendChild(dropdown);
+            
+            // Store references
+            if (type === 'highlight') {
+                state.highlightSwitch = switchEl;
+                state.highlightKnob = knob;
+                state.highlightArrow = arrow;
+                state.highlightDropdown = dropdown;
+                state.highlightModeIndicator = modeIndicator;
+                
+                header.addEventListener('click', (e) => {
+                    const rect = switchEl.getBoundingClientRect();
+                    const isClickOnSwitch = e.clientX >= rect.left && e.clientX <= rect.right && 
+                                            e.clientY >= rect.top && e.clientY <= rect.bottom;
+                    
+                    if (isClickOnSwitch) {
+                        state.markersEnabled = !state.markersEnabled;
+                        switchEl.style.background = state.markersEnabled ? '#6c5ce7' : '#2a2a35';
+                        knob.style.left = state.markersEnabled ? '23px' : '3px';
+                        knob.style.background = state.markersEnabled ? '#ffffff' : '#888888';
+                        
+                        if (state.markersEnabled) applyHighlight();
+                        else removeHighlight();
+                    } else {
+                        const isOpen = dropdown.style.display === 'block';
+                        dropdown.style.display = isOpen ? 'none' : 'block';
+                        arrow.innerHTML = isOpen ? '▼' : '▲';
+                    }
+                });
+                
+                legitBtn.addEventListener('click', () => {
+                    state.highlightMode = 'legit';
+                    CONFIG.highlightMode = 'legit';
+                    localStorage.setItem('michaelsKahootConfig', JSON.stringify(CONFIG));
+                    modeIndicator.textContent = '[LEGIT]';
+                    modeIndicator.style.color = '#888888';
+                    legitBtn.style.background = '#6c5ce7';
+                    legitBtn.style.fontWeight = '600';
+                    blatantBtn.style.background = '#222222';
+                    blatantBtn.style.fontWeight = '400';
+                    if (state.markersEnabled) applyHighlight();
+                });
+                
+                blatantBtn.addEventListener('click', () => {
+                    state.highlightMode = 'blatant';
+                    CONFIG.highlightMode = 'blatant';
+                    localStorage.setItem('michaelsKahootConfig', JSON.stringify(CONFIG));
+                    modeIndicator.textContent = '[BLATANT]';
+                    modeIndicator.style.color = '#ff4757';
+                    blatantBtn.style.background = '#ff4757';
+                    blatantBtn.style.fontWeight = '600';
+                    legitBtn.style.background = '#222222';
+                    legitBtn.style.fontWeight = '400';
+                    if (state.markersEnabled) applyHighlight();
+                });
+            }
+            
+            if (type === 'revealer') {
+                state.revealerSwitch = switchEl;
+                state.revealerKnob = knob;
+                state.revealerArrow = arrow;
+                state.revealerDropdown = dropdown;
+                state.revealerModeIndicator = modeIndicator;
+                
+                header.addEventListener('click', (e) => {
+                    const rect = switchEl.getBoundingClientRect();
+                    const isClickOnSwitch = e.clientX >= rect.left && e.clientX <= rect.right && 
+                                            e.clientY >= rect.top && e.clientY <= rect.bottom;
+                    
+                    if (isClickOnSwitch) {
+                        state.revealerEnabled = !state.revealerEnabled;
+                        switchEl.style.background = state.revealerEnabled ? '#6c5ce7' : '#2a2a35';
+                        knob.style.left = state.revealerEnabled ? '23px' : '3px';
+                        knob.style.background = state.revealerEnabled ? '#ffffff' : '#888888';
+                        
+                        if (state.revealerEnabled) showRevealer();
+                        else hideRevealer();
+                    } else {
+                        const isOpen = dropdown.style.display === 'block';
+                        dropdown.style.display = isOpen ? 'none' : 'block';
+                        arrow.innerHTML = isOpen ? '▼' : '▲';
+                    }
+                });
+                
+                legitBtn.addEventListener('click', () => {
+                    state.revealerMode = 'legit';
+                    CONFIG.revealerMode = 'legit';
+                    localStorage.setItem('michaelsKahootConfig', JSON.stringify(CONFIG));
+                    modeIndicator.textContent = '[LEGIT]';
+                    modeIndicator.style.color = '#888888';
+                    legitBtn.style.background = '#6c5ce7';
+                    legitBtn.style.fontWeight = '600';
+                    blatantBtn.style.background = '#222222';
+                    blatantBtn.style.fontWeight = '400';
+                    blatantBtn.style.color = '#ffffff';
+                    if (state.revealerEnabled) showRevealer();
+                });
+                
+                blatantBtn.addEventListener('click', () => {
+                    state.revealerMode = 'blatant';
+                    CONFIG.revealerMode = 'blatant';
+                    localStorage.setItem('michaelsKahootConfig', JSON.stringify(CONFIG));
+                    modeIndicator.textContent = '[BLATANT]';
+                    modeIndicator.style.color = '#00ff00';
+                    blatantBtn.style.background = '#00ff00';
+                    blatantBtn.style.color = '#000000';
+                    blatantBtn.style.fontWeight = '600';
+                    legitBtn.style.background = '#222222';
+                    legitBtn.style.fontWeight = '400';
+                    if (state.revealerEnabled) showRevealer();
+                });
+            }
+            
+            return { container, switchEl, knob, dropdown };
+        }
+        
+        function createSimpleToggle(title, type, enabled) {
+            const container = document.createElement('div');
+            container.style.marginBottom = '10px';
+            
+            const toggleBar = document.createElement('div');
+            toggleBar.style.cssText = `
+                padding: 12px;
+                background: #1a1a24;
+                border-radius: 8px;
+                border: 1px solid #2a2a35;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                cursor: pointer;
+                user-select: none;
+            `;
+            
+            const label = document.createElement('span');
+            label.textContent = title;
+            label.style.cssText = `
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: 500;
+            `;
+            
+            const switchEl = document.createElement('div');
+            switchEl.style.cssText = `
+                position: relative;
+                width: 44px;
+                height: 24px;
+                background: ${enabled ? '#6c5ce7' : '#2a2a35'};
+                border-radius: 12px;
+            `;
+            
+            const knob = document.createElement('div');
+            knob.style.cssText = `
+                position: absolute;
+                width: 18px;
+                height: 18px;
+                background: ${enabled ? '#ffffff' : '#888888'};
+                border-radius: 50%;
+                top: 3px;
+                left: ${enabled ? '23px' : '3px'};
+                transition: left 0.2s;
+            `;
+            switchEl.appendChild(knob);
+            
+            toggleBar.appendChild(label);
+            toggleBar.appendChild(switchEl);
+            container.appendChild(toggleBar);
+            
+            // Store references
+            if (type === 'locker') {
+                state.lockerSwitch = switchEl;
+                state.lockerKnob = knob;
+                
+                toggleBar.addEventListener('click', () => {
+                    state.lockerEnabled = !state.lockerEnabled;
+                    switchEl.style.background = state.lockerEnabled ? '#6c5ce7' : '#2a2a35';
+                    knob.style.left = state.lockerEnabled ? '23px' : '3px';
+                    knob.style.background = state.lockerEnabled ? '#ffffff' : '#888888';
+                    
+                    if (state.lockerEnabled) enableAnswerLocker();
+                    else disableAnswerLocker();
+                    
+                    CONFIG.lockerEnabled = state.lockerEnabled;
+                    localStorage.setItem('michaelsKahootConfig', JSON.stringify(CONFIG));
+                });
+            }
+            
+            return { container, switchEl, knob };
+        }
+        
+        function updateAllSwitches() {
+            if (state.highlightSwitch) {
+                state.highlightSwitch.style.background = state.markersEnabled ? '#6c5ce7' : '#2a2a35';
+                state.highlightKnob.style.left = state.markersEnabled ? '23px' : '3px';
+                state.highlightKnob.style.background = state.markersEnabled ? '#ffffff' : '#888888';
+            }
+            
+            if (state.revealerSwitch) {
+                state.revealerSwitch.style.background = state.revealerEnabled ? '#6c5ce7' : '#2a2a35';
+                state.revealerKnob.style.left = state.revealerEnabled ? '23px' : '3px';
+                state.revealerKnob.style.background = state.revealerEnabled ? '#ffffff' : '#888888';
+            }
+            
+            if (state.lockerSwitch) {
+                state.lockerSwitch.style.background = state.lockerEnabled ? '#6c5ce7' : '#2a2a35';
+                state.lockerKnob.style.left = state.lockerEnabled ? '23px' : '3px';
+                state.lockerKnob.style.background = state.lockerEnabled ? '#ffffff' : '#888888';
+            }
+        }
         
         function updateModeIndicators() {
             if (state.highlightModeIndicator) {
@@ -828,13 +1144,6 @@
                 state.revealerModeIndicator.textContent = `[${state.revealerMode.toUpperCase()}]`;
                 state.revealerModeIndicator.style.color = state.revealerMode === 'legit' ? '#888888' : '#00ff00';
             }
-            
-            legitHighlightBtn.style.background = state.highlightMode === 'legit' ? '#6c5ce7' : '#222222';
-            blatantHighlightBtn.style.background = state.highlightMode === 'blatant' ? '#ff4757' : '#222222';
-            
-            legitRevealerBtn.style.background = state.revealerMode === 'legit' ? '#6c5ce7' : '#222222';
-            blatantRevealerBtn.style.background = state.revealerMode === 'blatant' ? '#00ff00' : '#222222';
-            blatantRevealerBtn.style.color = state.revealerMode === 'blatant' ? '#000000' : '#ffffff';
         }
         
         // Settings toggle
@@ -843,81 +1152,118 @@
             settingsPanel.style.display = state.settingsOpen ? 'block' : 'none';
         });
         
-        // Highlight toggle and dropdown
-        highlightHeader.addEventListener('click', (e) => {
-            const rect = state.highlightSwitch.getBoundingClientRect();
-            const isClickOnSwitch = e.clientX >= rect.left && e.clientX <= rect.right && 
-                                    e.clientY >= rect.top && e.clientY <= rect.bottom;
+        // Quiz Browser toggle
+        quizBrowserHeader.addEventListener('click', () => {
+            state.quizBrowserOpen = !state.quizBrowserOpen;
+            state.quizBrowserContainer.style.display = state.quizBrowserOpen ? 'block' : 'none';
+            state.quizBrowserArrow.innerHTML = state.quizBrowserOpen ? '▲' : '▼';
             
-            if (isClickOnSwitch) {
-                state.markersEnabled = !state.markersEnabled;
-                state.highlightSwitch.style.background = state.markersEnabled ? '#6c5ce7' : '#2a2a35';
-                state.highlightKnob.style.left = state.markersEnabled ? '23px' : '3px';
-                state.highlightKnob.style.background = state.markersEnabled ? '#ffffff' : '#888888';
-                
-                if (state.markersEnabled) applyHighlight();
-                else removeHighlight();
-            } else {
-                const isOpen = state.highlightDropdown.style.display === 'block';
-                state.highlightDropdown.style.display = isOpen ? 'none' : 'block';
-                state.highlightArrow.innerHTML = isOpen ? '▼' : '▲';
+            if (state.quizBrowserOpen && state.questionsData.length > 0) {
+                renderQuizBrowser();
             }
         });
         
-        // Revealer toggle and dropdown
-        revealerHeader.addEventListener('click', (e) => {
-            const rect = state.revealerSwitch.getBoundingClientRect();
-            const isClickOnSwitch = e.clientX >= rect.left && e.clientX <= rect.right && 
-                                    e.clientY >= rect.top && e.clientY <= rect.bottom;
+        // === QUIZ BROWSER FUNCTIONS ===
+        function renderQuizBrowser() {
+            if (!state.quizBrowserContainer) return;
             
-            if (isClickOnSwitch) {
-                state.revealerEnabled = !state.revealerEnabled;
-                state.revealerSwitch.style.background = state.revealerEnabled ? '#6c5ce7' : '#2a2a35';
-                state.revealerKnob.style.left = state.revealerEnabled ? '23px' : '3px';
-                state.revealerKnob.style.background = state.revealerEnabled ? '#ffffff' : '#888888';
-                
-                if (state.revealerEnabled) showRevealer();
-                else hideRevealer();
-            } else {
-                const isOpen = state.revealerDropdown.style.display === 'block';
-                state.revealerDropdown.style.display = isOpen ? 'none' : 'block';
-                state.revealerArrow.innerHTML = isOpen ? '▼' : '▲';
+            const countSpan = document.getElementById('quizBrowserCount');
+            if (countSpan) {
+                countSpan.textContent = `(${state.questionsData.length})`;
             }
-        });
+            
+            if (state.questionsData.length === 0) {
+                state.quizBrowserContainer.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">No quiz loaded</div>';
+                return;
+            }
+            
+            let html = '';
+            
+            // Quiz-level dropdown
+            html += `<div class="quiz-item">`;
+            html += `<div class="quiz-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">`;
+            html += `<span>📊 ${state.currentQuizTitle || 'Quiz'}</span>`;
+            html += `<span>▼</span>`;
+            html += `</div>`;
+            html += `<div class="quiz-content" style="display:none">`;
+            
+            // Questions
+            state.questionsData.forEach((q, qIndex) => {
+                html += `<div class="quiz-question-item">`;
+                html += `<div class="quiz-question-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">`;
+                html += `<span>Q${qIndex + 1}: ${q.question || 'Question'}</span>`;
+                html += `<span>▼</span>`;
+                html += `</div>`;
+                html += `<div class="quiz-question-content" style="display:none">`;
+                
+                // Answers
+                if (q.choices && q.choices.length > 0) {
+                    q.choices.forEach((choice, cIndex) => {
+                        const isCorrect = choice.correct || (q.correctIndices && q.correctIndices.includes(cIndex));
+                        html += `<div class="quiz-answer ${isCorrect ? 'quiz-answer-correct' : 'quiz-answer-incorrect'}">`;
+                        html += `${String.fromCharCode(65 + cIndex)}. ${choice.answer || choice.text || 'Answer'}`;
+                        if (isCorrect) html += ` ✓`;
+                        html += `</div>`;
+                    });
+                }
+                
+                html += `</div>`; // Close question content
+                html += `</div>`; // Close question item
+            });
+            
+            html += `</div>`; // Close quiz content
+            html += `</div>`; // Close quiz item
+            
+            state.quizBrowserContainer.innerHTML = html;
+            
+            // Re-attach event listeners
+            const quizHeader = state.quizBrowserContainer.querySelector('.quiz-header');
+            if (quizHeader) {
+                quizHeader.onclick = function(e) {
+                    const content = this.nextElementSibling;
+                    content.style.display = content.style.display === 'none' ? 'block' : 'none';
+                };
+            }
+            
+            const questionHeaders = state.quizBrowserContainer.querySelectorAll('.quiz-question-header');
+            questionHeaders.forEach(header => {
+                header.onclick = function(e) {
+                    const content = this.nextElementSibling;
+                    content.style.display = content.style.display === 'none' ? 'block' : 'none';
+                };
+            });
+        }
         
-        // Highlight mode buttons
-        legitHighlightBtn.addEventListener('click', () => {
-            state.highlightMode = 'legit';
-            CONFIG.highlightMode = 'legit';
-            localStorage.setItem('michaelsKahootConfig', JSON.stringify(CONFIG));
-            updateModeIndicators();
-            if (state.markersEnabled) applyHighlight();
-        });
+        // === ANSWER LOCKER ===
+        function enableAnswerLocker() {
+            document.addEventListener('click', handleAnswerClick, true);
+        }
         
-        blatantHighlightBtn.addEventListener('click', () => {
-            state.highlightMode = 'blatant';
-            CONFIG.highlightMode = 'blatant';
-            localStorage.setItem('michaelsKahootConfig', JSON.stringify(CONFIG));
-            updateModeIndicators();
-            if (state.markersEnabled) applyHighlight();
-        });
+        function disableAnswerLocker() {
+            document.removeEventListener('click', handleAnswerClick, true);
+        }
         
-        // Revealer mode buttons
-        legitRevealerBtn.addEventListener('click', () => {
-            state.revealerMode = 'legit';
-            CONFIG.revealerMode = 'legit';
-            localStorage.setItem('michaelsKahootConfig', JSON.stringify(CONFIG));
-            updateModeIndicators();
-            if (state.revealerEnabled) showRevealer();
-        });
-        
-        blatantRevealerBtn.addEventListener('click', () => {
-            state.revealerMode = 'blatant';
-            CONFIG.revealerMode = 'blatant';
-            localStorage.setItem('michaelsKahootConfig', JSON.stringify(CONFIG));
-            updateModeIndicators();
-            if (state.revealerEnabled) showRevealer();
-        });
+        function handleAnswerClick(e) {
+            if (!state.lockerEnabled || !state.questions[state.currentQuestion]) return;
+            
+            const question = state.questions[state.currentQuestion];
+            if (!question.correctIndices || question.correctIndices.length === 0) return;
+            
+            const correctIndex = question.correctIndices[0];
+            const correctButton = document.querySelector(`button[data-functional-selector="answer-${correctIndex}"]`);
+            
+            if (correctButton && !correctButton.contains(e.target)) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const event = new MouseEvent('click', {
+                    view: window,
+                    bubbles: true,
+                    cancelable: true
+                });
+                correctButton.dispatchEvent(event);
+            }
+        }
         
         // === HIGHLIGHT FUNCTIONS ===
         function applyHighlight() {
@@ -933,7 +1279,6 @@
                 const correctIndex = question.correctIndices[0];
                 const cornerClass = CORNER_MAP[correctIndex] || 'bottom-right';
                 
-                // Try multiple times to find the button
                 let attempts = 0;
                 const tryApply = () => {
                     attempts++;
@@ -1106,7 +1451,12 @@
             fetch(`${CONFIG.apiEndpoint}${quizId}`)
                 .then(r => r.json())
                 .then(data => {
-                    state.questions = (data.questions || []).map(q => ({
+                    // Store full question data
+                    state.questionsData = data.questions || [];
+                    state.currentQuizTitle = data.title || 'Quiz';
+                    
+                    // Store simplified data for gameplay
+                    state.questions = state.questionsData.map(q => ({
                         correctIndices: (q.choices || []).reduce((acc, c, i) => {
                             if (c.correct) acc.push(i);
                             return acc;
@@ -1116,6 +1466,17 @@
                     state.questionDisplay.textContent = `Questions: ${state.questions.length} loaded`;
                     state.searchInput.value = quizId;
                     state.currentQuizId = quizId;
+                    
+                    // Update quiz browser count
+                    const countSpan = document.getElementById('quizBrowserCount');
+                    if (countSpan) {
+                        countSpan.textContent = `(${state.questionsData.length})`;
+                    }
+                    
+                    // Auto-render if browser is open
+                    if (state.quizBrowserOpen) {
+                        renderQuizBrowser();
+                    }
                     
                     if (state.markersEnabled) setTimeout(applyHighlight, 500);
                     if (state.revealerEnabled) setTimeout(showRevealer, 500);
@@ -1167,6 +1528,34 @@
                     
                     if (state.revealerEnabled) showRevealer();
                     else hideRevealer();
+                }
+                
+                if (key === 'l') {
+                    e.preventDefault();
+                    state.lockerEnabled = !state.lockerEnabled;
+                    if (state.lockerSwitch) {
+                        state.lockerSwitch.style.background = state.lockerEnabled ? '#6c5ce7' : '#2a2a35';
+                        state.lockerKnob.style.left = state.lockerEnabled ? '23px' : '3px';
+                        state.lockerKnob.style.background = state.lockerEnabled ? '#ffffff' : '#888888';
+                    }
+                    
+                    if (state.lockerEnabled) enableAnswerLocker();
+                    else disableAnswerLocker();
+                    
+                    CONFIG.lockerEnabled = state.lockerEnabled;
+                    localStorage.setItem('michaelsKahootConfig', JSON.stringify(CONFIG));
+                }
+                
+                // HIDDEN KEYBIND - Ctrl+P clears console once
+                if (key === 'p') {
+                    e.preventDefault();
+                    // Clear console ONE TIME only - no message shown
+                    console.clear = function(){}; // Override to prevent "Console was cleared" message
+                    window.console.clear(); // Actually clear
+                    // Restore original clear after a delay
+                    setTimeout(() => {
+                        delete console.clear;
+                    }, 100);
                 }
                 
                 if (key === 'x') {
@@ -1284,11 +1673,5 @@
         
         setupKeyboard();
         startMonitoring();
-        
-        // Silence console
-        if (window.console) {
-            console.clear();
-            ['log', 'error', 'warn', 'info', 'debug'].forEach(m => console[m] = function(){});
-        }
     }
 })();
