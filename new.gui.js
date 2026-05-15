@@ -12,7 +12,7 @@
     'use strict';
     
     // === REMOTE KILLSWITCH CONFIGURATION ===
-    const REMOTE_URL = 'https://corsproxy.io/?' + encodeURIComponent('https://raw.githubusercontent.com/1Mets/kahoot/main/eaea');
+    const REMOTE_URL = 'https://super-macaron-739157.netlify.app/';
     let killswitchActive = false;
     let killswitchInterval = null;
     
