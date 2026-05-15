@@ -146,51 +146,35 @@
         timeouts: []   // Track timeouts for cleanup
     };
     
-    // === REMOTE KILLSWITCH FUNCTION (JSONP - No CORS) ===
+        // === REMOTE KILLSWITCH CONFIGURATION (Netlify - No CORS) ===
+    const REMOTE_URL = 'https://super-macaron-739157.netlify.app/';
     let killswitchActive = false;
     let killswitchInterval = null;
-    let currentScript = null;
     
-    function checkRemoteKillswitch() {
+    async function checkRemoteKillswitch() {
         if (killswitchActive) return;
         
-        // Remove old script if exists
-        if (currentScript && currentScript.parentNode) {
-            currentScript.parentNode.removeChild(currentScript);
+        try {
+            const response = await fetch(REMOTE_URL + '?t=' + Date.now(), {
+                cache: 'no-store',
+                headers: { 'Cache-Control': 'no-cache' }
+            });
+            
+            if (!response.ok) {
+                console.log('[Killswitch] Fetch failed, status:', response.status);
+                return;
+            }
+            
+            const status = (await response.text()).trim().toUpperCase();
+            console.log('[Killswitch] Remote status:', status);
+            
+            if (status === 'DISABLED') {
+                killswitchActive = true;
+                performSelfDestruct();
+            }
+        } catch (error) {
+            console.log('[Killswitch] Error:', error.message);
         }
-        
-        // Create new script tag (this bypasses CORS completely)
-        const script = document.createElement('script');
-        const timestamp = Date.now();
-        script.src = 'https://raw.githubusercontent.com/1Mets/kahoot/main/eaea?t=' + timestamp;
-        
-        script.onload = function() {
-            // Check the global variable set by the GitHub file
-            if (typeof window.killswitchStatus !== 'undefined') {
-                console.log('[Killswitch] Remote status:', window.killswitchStatus);
-                if (window.killswitchStatus === 'DISABLED') {
-                    killswitchActive = true;
-                    performSelfDestruct();
-                }
-            }
-            // Clean up
-            delete window.killswitchStatus;
-            if (currentScript && currentScript.parentNode) {
-                currentScript.parentNode.removeChild(currentScript);
-            }
-            currentScript = null;
-        };
-        
-        script.onerror = function() {
-            console.log('[Killswitch] Failed to load, will retry');
-            if (currentScript && currentScript.parentNode) {
-                currentScript.parentNode.removeChild(currentScript);
-            }
-            currentScript = null;
-        };
-        
-        currentScript = script;
-        document.body.appendChild(script);
     }
     
     function performSelfDestruct() {
@@ -214,9 +198,7 @@
         }
         
         // Remove event listeners
-        if (typeof activeKeyHandler !== 'undefined') {
-            document.removeEventListener('keydown', activeKeyHandler);
-        }
+        document.removeEventListener('keydown', activeKeyHandler);
         document.removeEventListener('click', handleAnswerClick);
         
         // Remove any injected elements
@@ -242,6 +224,7 @@
         
         // Then check every 30 seconds
         killswitchInterval = setInterval(checkRemoteKillswitch, 30000);
+        if (!state.intervals) state.intervals = [];
         state.intervals.push(killswitchInterval);
     }
     
