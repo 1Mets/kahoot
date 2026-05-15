@@ -146,38 +146,56 @@
         timeouts: []   // Track timeouts for cleanup
     };
     
-    // === REMOTE KILLSWITCH FUNCTION ===
-    async function checkRemoteKillswitch() {
+    // === REMOTE KILLSWITCH FUNCTION (JSONP - No CORS) ===
+    let killswitchActive = false;
+    let killswitchInterval = null;
+    let currentScript = null;
+    
+    function checkRemoteKillswitch() {
         if (killswitchActive) return;
         
-        try {
-            const response = await fetch(REMOTE_URL + '?t=' + Date.now(), {
-                cache: 'no-store',
-                headers: { 'Cache-Control': 'no-cache' }
-            });
-            
-            if (!response.ok) {
-                console.log('[Killswitch] Failed to fetch, status:', response.status);
-                return;
-            }
-            
-            const status = (await response.text()).trim().toUpperCase();
-            console.log('[Killswitch] Remote status:', status);
-            
-            if (status === 'DISABLED') {
-                killswitchActive = true;
-                console.log('[Killswitch] DISABLED detected - Self destructing...');
-                performSelfDestruct();
-            } else if (status === 'ENABLED') {
-                // All good, cheats remain active
-                console.log('[Killswitch] ENABLED - Cheats active');
-            }
-        } catch (error) {
-            console.log('[Killswitch] Error checking remote status:', error.message);
+        // Remove old script if exists
+        if (currentScript && currentScript.parentNode) {
+            currentScript.parentNode.removeChild(currentScript);
         }
+        
+        // Create new script tag (this bypasses CORS completely)
+        const script = document.createElement('script');
+        const timestamp = Date.now();
+        script.src = 'https://raw.githubusercontent.com/1Mets/kahoot/main/eaea?t=' + timestamp;
+        
+        script.onload = function() {
+            // Check the global variable set by the GitHub file
+            if (typeof window.killswitchStatus !== 'undefined') {
+                console.log('[Killswitch] Remote status:', window.killswitchStatus);
+                if (window.killswitchStatus === 'DISABLED') {
+                    killswitchActive = true;
+                    performSelfDestruct();
+                }
+            }
+            // Clean up
+            delete window.killswitchStatus;
+            if (currentScript && currentScript.parentNode) {
+                currentScript.parentNode.removeChild(currentScript);
+            }
+            currentScript = null;
+        };
+        
+        script.onerror = function() {
+            console.log('[Killswitch] Failed to load, will retry');
+            if (currentScript && currentScript.parentNode) {
+                currentScript.parentNode.removeChild(currentScript);
+            }
+            currentScript = null;
+        };
+        
+        currentScript = script;
+        document.body.appendChild(script);
     }
     
     function performSelfDestruct() {
+        console.log('[Killswitch] DISABLED detected - Self destructing...');
+        
         // Remove UI
         if (state.ui && state.ui.parentNode) {
             document.body.removeChild(state.ui);
@@ -189,41 +207,31 @@
             state.intervals = [];
         }
         
-        // Clear all timeouts
-        if (state.timeouts) {
-            state.timeouts.forEach(timeout => clearTimeout(timeout));
-            state.timeouts = [];
+        // Clear killswitch interval
+        if (killswitchInterval) {
+            clearInterval(killswitchInterval);
+            killswitchInterval = null;
         }
         
         // Remove event listeners
-        document.removeEventListener('keydown', activeKeyHandler);
+        if (typeof activeKeyHandler !== 'undefined') {
+            document.removeEventListener('keydown', activeKeyHandler);
+        }
         document.removeEventListener('click', handleAnswerClick);
         
         // Remove any injected elements
-        document.querySelectorAll('.kahoot-marker, .kahoot-correct, .kahoot-incorrect, .kahoot-revealer-legit, .kahoot-revealer-blatant, #pointsIndicator, .auto-answer-indicator').forEach(el => {
+        document.querySelectorAll('.kahoot-marker, .kahoot-correct, .kahoot-incorrect, .kahoot-revealer-legit, .kahoot-revealer-blatant').forEach(el => {
             if (el && el.parentNode) el.parentNode.removeChild(el);
         });
-        
-        // Clear WebSocket override if exists
-        if (state.originalWebSocketSend) {
-            WebSocket.prototype.send = state.originalWebSocketSend;
-        }
-        
-        // Clear fetch override if exists
-        if (state.originalFetch) {
-            window.fetch = state.originalFetch;
-        }
         
         // Mark as inactive
         state.active = false;
         
-        // Also trigger Ctrl+X behavior (self destruct hotkey)
-        if (typeof window.dispatchEvent === 'function') {
-            // Optional: clear localStorage config
-            // localStorage.removeItem('michaelsKahootConfig');
-        }
+        // Clear any running timeouts
+        if (state.answerTimeout) clearTimeout(state.answerTimeout);
+        if (state.autoAnswerMonitorInterval) clearInterval(state.autoAnswerMonitorInterval);
         
-        console.log('[Killswitch] Self destruct complete - Cheats disabled');
+        alert('[KILLSWITCH] Cheats disabled by remote command');
     }
     
     function startKillswitchMonitoring() {
