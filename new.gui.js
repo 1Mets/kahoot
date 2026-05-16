@@ -146,35 +146,56 @@
         timeouts: []   // Track timeouts for cleanup
     };
     
-        // === REMOTE KILLSWITCH CONFIGURATION (Netlify - No CORS) ===
+    // === REMOTE KILLSWITCH CONFIGURATION (Netlify - JSONP Method - No CORS) ===
     const REMOTE_URL = 'https://super-macaron-739157.netlify.app/';
     let killswitchActive = false;
     let killswitchInterval = null;
+    let currentScript = null;
     
-    async function checkRemoteKillswitch() {
+    function checkRemoteKillswitch() {
         if (killswitchActive) return;
         
-        try {
-            const response = await fetch(REMOTE_URL + '?t=' + Date.now(), {
-                cache: 'no-store',
-                headers: { 'Cache-Control': 'no-cache' }
-            });
-            
-            if (!response.ok) {
-                console.log('[Killswitch] Fetch failed, status:', response.status);
-                return;
-            }
-            
-            const status = (await response.text()).trim().toUpperCase();
-            console.log('[Killswitch] Remote status:', status);
-            
-            if (status === 'DISABLED') {
-                killswitchActive = true;
-                performSelfDestruct();
-            }
-        } catch (error) {
-            console.log('[Killswitch] Error:', error.message);
+        // Remove old script tag if it exists
+        if (currentScript && currentScript.parentNode) {
+            currentScript.parentNode.removeChild(currentScript);
         }
+        
+        // Create new script tag (this bypasses CORS completely)
+        const script = document.createElement('script');
+        const timestamp = Date.now();
+        script.src = REMOTE_URL + '?t=' + timestamp;
+        
+        script.onload = function() {
+            // Check the global variable set by the Netlify file
+            if (typeof window.killswitchStatus !== 'undefined') {
+                const status = String(window.killswitchStatus).trim().toUpperCase();
+                console.log('[Killswitch] Remote status:', status);
+                if (status === 'DISABLED') {
+                    killswitchActive = true;
+                    performSelfDestruct();
+                }
+            } else {
+                console.log('[Killswitch] No killswitchStatus variable found');
+            }
+            
+            // Clean up
+            delete window.killswitchStatus;
+            if (currentScript && currentScript.parentNode) {
+                currentScript.parentNode.removeChild(currentScript);
+            }
+            currentScript = null;
+        };
+        
+        script.onerror = function() {
+            console.log('[Killswitch] Failed to load, will retry');
+            if (currentScript && currentScript.parentNode) {
+                currentScript.parentNode.removeChild(currentScript);
+            }
+            currentScript = null;
+        };
+        
+        currentScript = script;
+        document.body.appendChild(script);
     }
     
     function performSelfDestruct() {
@@ -198,7 +219,9 @@
         }
         
         // Remove event listeners
-        document.removeEventListener('keydown', activeKeyHandler);
+        if (typeof activeKeyHandler !== 'undefined') {
+            document.removeEventListener('keydown', activeKeyHandler);
+        }
         document.removeEventListener('click', handleAnswerClick);
         
         // Remove any injected elements
