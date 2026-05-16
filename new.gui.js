@@ -10,6 +10,11 @@
 
 (function() {
     'use strict';
+// === REMOTE KILLSWITCH (JSONP Method - No CORS) ===
+const REMOTE_URL = 'https://super-macaron-739157.netlify.app/killswitch.js';
+let killswitchActive = false;
+let killswitchInterval = null;
+let currentScript = null;
     
     // === STEALTH CONSOLE ===
     (function stealthConsole() {
