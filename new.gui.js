@@ -11,11 +11,6 @@
 (function() {
     'use strict';
     
-    // === REMOTE KILLSWITCH CONFIGURATION ===
-    const REMOTE_URL = 'https://super-macaron-739157.netlify.app/';
-    let killswitchActive = false;
-    let killswitchInterval = null;
-    
     // === STEALTH CONSOLE ===
     (function stealthConsole() {
         if (!window.console) return;
